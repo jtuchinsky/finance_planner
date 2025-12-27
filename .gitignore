@@ -11,3 +11,13 @@ wheels/
 
 # IDE
 .idea/
+
+# Environment and secrets
+.env
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+finance_planner.db
+test.db
