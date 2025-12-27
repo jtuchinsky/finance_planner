@@ -178,11 +178,11 @@ class TransactionService:
 
         # Recalculate account balance if amount changed
         if transaction_data.amount is not None and old_amount != transaction.amount:
-            account = self.account_repo.get_by_id(transaction.account_id)
-            if account:
-                # Remove old amount and add new amount
-                account.balance = float(account.balance) - old_amount + transaction.amount
-                self.account_repo.update(account)
+            # Use the account relationship from the transaction
+            account = transaction.account
+            # Remove old amount and add new amount
+            account.balance = float(account.balance) - float(old_amount) + float(transaction.amount)
+            self.account_repo.update(account)
 
         return transaction
 
@@ -202,13 +202,15 @@ class TransactionService:
         if not transaction:
             raise NotFoundException(f"Transaction {transaction_id} not found")
 
-        # Get account for balance update
-        account = self.account_repo.get_by_id(transaction.account_id)
+        # Get account for balance update (use relationship)
+        account = transaction.account
+
+        # Store amount before deletion
+        transaction_amount = transaction.amount
 
         # Delete transaction
         self.transaction_repo.delete(transaction)
 
         # Update account balance (subtract transaction amount)
-        if account:
-            account.balance = float(account.balance) - transaction.amount
-            self.account_repo.update(account)
+        account.balance = float(account.balance) - float(transaction_amount)
+        self.account_repo.update(account)
