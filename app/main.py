@@ -9,7 +9,7 @@ from app.core.exceptions import (
     ForbiddenException,
     ValidationException,
 )
-from app.routes import account_routes
+from app.routes import account_routes, transaction_routes
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -73,4 +73,4 @@ async def root():
 
 # Include routers
 app.include_router(account_routes.router, prefix="/api/accounts", tags=["Accounts"])
-# app.include_router(transaction_routes.router, prefix="/api/transactions", tags=["Transactions"])
+app.include_router(transaction_routes.router, prefix="/api/transactions", tags=["Transactions"])

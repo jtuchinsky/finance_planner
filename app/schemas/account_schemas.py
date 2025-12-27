@@ -21,6 +21,8 @@ class AccountUpdate(BaseModel):
 class AccountResponse(BaseModel):
     """Schema for account response"""
 
+    model_config = {"from_attributes": True}
+
     id: int
     user_id: int
     name: str
@@ -28,9 +30,6 @@ class AccountResponse(BaseModel):
     balance: float
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class AccountListResponse(BaseModel):

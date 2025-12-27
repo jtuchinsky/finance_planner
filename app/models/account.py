@@ -51,5 +51,4 @@ class Account(Base, TimestampMixin):
         "Transaction",
         back_populates="account",
         cascade="all, delete-orphan",  # Delete transactions if account deleted
-        order_by="desc(Transaction.date)",
     )
