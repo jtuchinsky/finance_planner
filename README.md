@@ -26,7 +26,7 @@ This is a FastAPI-based Resource Server that integrates with [MCP_Auth](https://
 ## Architecture
 
 ```
-Routes ’ Services ’ Repositories ’ Models
+Routes ï¿½ Services ï¿½ Repositories ï¿½ Models
 ```
 
 - **Routes**: FastAPI endpoints with dependency injection
@@ -41,7 +41,9 @@ Routes ’ Services ’ Repositories ’ Models
 - Python 3.12+
 - UV package manager
 - PostgreSQL (production) or SQLite (development)
-- Running MCP_Auth service for authentication
+- **Running MCP_Auth service for authentication** - [Setup Guide](https://github.com/jtuchinsky/MCP_Auth/blob/main/docs/RUNNING.md)
+
+**Note:** Finance Planner requires [MCP_Auth](https://github.com/jtuchinsky/MCP_Auth) for JWT token generation and validation. Both services must be running together. See [Running Both Services](docs/RUNNING.md#running-both-services-together) for detailed setup instructions.
 
 ### Installation
 
@@ -64,22 +66,45 @@ cp .env.example .env
 # Edit .env and set SECRET_KEY to match your MCP_Auth instance!
 ```
 
-**  CRITICAL**: The `SECRET_KEY` in `.env` MUST match your MCP_Auth service's SECRET_KEY for JWT validation to work.
+**ï¿½ CRITICAL**: The `SECRET_KEY` in `.env` MUST match your MCP_Auth service's SECRET_KEY for JWT validation to work.
 
 4. Run database migrations:
 ```bash
 alembic upgrade head
 ```
 
-5. Start the server:
+5. Start both services (Finance Planner requires MCP_Auth):
 ```bash
-uvicorn app.main:app --reload
+# See docs/RUNNING.md for complete deployment options
+# Quick development setup:
+
+# Terminal 1 - MCP_Auth (port 8001):
+cd ../MCP_Auth && source .venv/bin/activate
+uvicorn main:app --reload --port 8001
+
+# Terminal 2 - Finance Planner (port 8000):
+uvicorn app.main:app --reload --port 8000
 ```
 
 6. Visit API documentation:
 ```
 http://localhost:8000/docs
 ```
+
+### Deployment Options
+
+For production deployment and advanced configurations, see [docs/RUNNING.md](docs/RUNNING.md) which includes:
+
+- **Development Setup**: Multiple methods (two terminals, tmux, startup scripts, log monitoring)
+- **Production Deployment**:
+  - **systemd** (Linux) with automatic startup and dependency management
+  - **Supervisor** for cross-platform process management
+  - **Docker Compose** templates (future)
+  - **Manual process management** with start/stop/restart scripts
+- **Reverse Proxy**: Complete nginx configuration for both services with SSL/TLS
+- **Configuration**: Shared SECRET_KEY setup and verification scripts
+- **Health Checks**: Service monitoring and end-to-end integration testing
+- **Troubleshooting**: Multi-service specific issues and solutions
 
 ## Configuration
 
@@ -111,7 +136,7 @@ All endpoints require `Authorization: Bearer <jwt_token>` header.
 
 ## Authentication Flow
 
-1. User authenticates with MCP_Auth service ’ receives JWT access token
+1. User authenticates with MCP_Auth service ï¿½ receives JWT access token
 2. User makes request to Finance Planner with `Authorization: Bearer <token>`
 3. Finance Planner validates JWT using shared SECRET_KEY
 4. Extracts user_id from JWT `sub` claim
@@ -175,9 +200,9 @@ See `docs/PLAN.md` for comprehensive deployment guide including:
 - =( Test suite
 
 **Planned:**
-- =Ë Analytics endpoints
-- =Ë Bulk operations
-- =Ë Export/import features
+- =ï¿½ Analytics endpoints
+- =ï¿½ Bulk operations
+- =ï¿½ Export/import features
 
 ## Security
 

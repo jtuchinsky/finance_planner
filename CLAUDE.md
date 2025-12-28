@@ -12,7 +12,7 @@ Multi-tenant personal finance tracker that integrates with MCP_Auth (https://git
 - Python >= 3.12
 - UV package manager
 - PostgreSQL (production) or SQLite (development)
-- Running MCP_Auth service for authentication
+- **Running MCP_Auth service for authentication** - Both services must run together
 
 **Setup:**
 ```bash
@@ -28,6 +28,27 @@ cp .env.example .env
 ```
 
 The `SECRET_KEY` in `.env` MUST be identical to MCP_Auth's SECRET_KEY for JWT validation.
+
+**Running Both Services Together:**
+
+Finance Planner requires MCP_Auth for JWT token generation and validation. See [docs/RUNNING.md](docs/RUNNING.md) for comprehensive deployment guides including:
+
+- **Development**: Two terminals, tmux, startup scripts, log monitoring
+- **Production**: systemd, Supervisor, Docker Compose templates, nginx reverse proxy
+- **Configuration**: Shared SECRET_KEY verification scripts
+- **Health Checks**: Service monitoring and integration testing
+- **Troubleshooting**: Multi-service specific issues
+
+Quick development setup:
+```bash
+# Terminal 1 - MCP_Auth (port 8001)
+cd ../MCP_Auth && source .venv/bin/activate
+uvicorn main:app --reload --port 8001
+
+# Terminal 2 - Finance Planner (port 8000)
+cd ../finance_planner && source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000
+```
 
 ## Development Commands
 
