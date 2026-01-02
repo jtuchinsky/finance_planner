@@ -115,6 +115,54 @@ class TestTransactionCreation:
 
         assert response.status_code == 404
 
+    def test_create_transaction_with_derived_fields(self, client, auth_headers):
+        """Transaction can be created with der_category and der_merchant"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        transaction_data = {
+            "account_id": account_id,
+            "amount": -50.00,
+            "date": str(date.today()),
+            "category": "groceries",
+            "merchant": "Whole Foods Market",
+            "der_category": "food",
+            "der_merchant": "Whole Foods",
+            "description": "Weekly shopping",
+        }
+        response = client.post("/api/transactions", headers=auth_headers, json=transaction_data)
+
+        assert response.status_code == 201
+        transaction = response.json()
+        assert transaction["der_category"] == "food"
+        assert transaction["der_merchant"] == "Whole Foods"
+
+    def test_create_transaction_without_derived_fields(self, client, auth_headers):
+        """Transaction can be created without der_category and der_merchant (backward compatibility)"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        transaction_data = {
+            "account_id": account_id,
+            "amount": -30.00,
+            "date": str(date.today()),
+            "category": "groceries",
+        }
+        response = client.post("/api/transactions", headers=auth_headers, json=transaction_data)
+
+        assert response.status_code == 201
+        transaction = response.json()
+        assert transaction["der_category"] is None
+        assert transaction["der_merchant"] is None
+
 
 class TestTransactionRetrieval:
     """Tests for retrieving transactions"""
@@ -418,6 +466,102 @@ class TestTransactionRetrieval:
         response = client.get("/api/transactions?limit=5&offset=5", headers=auth_headers)
         assert len(response.json()["transactions"]) == 5
 
+    def test_filter_by_der_category(self, client, auth_headers):
+        """Can filter transactions by derived category (exact match)"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        # Create transactions with different derived categories
+        client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -50.00,
+                "date": str(date.today()),
+                "category": "groceries",
+                "der_category": "food",
+            },
+        )
+        client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -30.00,
+                "date": str(date.today()),
+                "category": "restaurant",
+                "der_category": "food",
+            },
+        )
+        client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -20.00,
+                "date": str(date.today()),
+                "category": "movies",
+                "der_category": "entertainment",
+            },
+        )
+
+        # Filter by der_category="food"
+        response = client.get("/api/transactions?der_category=food", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2
+        for transaction in data["transactions"]:
+            assert transaction["der_category"] == "food"
+
+    def test_filter_by_der_merchant(self, client, auth_headers):
+        """Can filter transactions by derived merchant (partial match)"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        # Create transactions with different derived merchants
+        client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -50.00,
+                "date": str(date.today()),
+                "category": "groceries",
+                "merchant": "Whole Foods Market Seattle",
+                "der_merchant": "Whole Foods",
+            },
+        )
+        client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -30.00,
+                "date": str(date.today()),
+                "category": "groceries",
+                "merchant": "Safeway #123",
+                "der_merchant": "Safeway",
+            },
+        )
+
+        # Filter by "Whole" (partial match)
+        response = client.get("/api/transactions?der_merchant=Whole", headers=auth_headers)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert "Whole" in data["transactions"][0]["der_merchant"]
+
 
 class TestTransactionUpdate:
     """Tests for updating transactions"""
@@ -506,6 +650,47 @@ class TestTransactionUpdate:
         )
 
         assert response.status_code == 404
+
+    def test_update_transaction_derived_fields(self, client, auth_headers):
+        """Can update der_category and der_merchant on existing transaction"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        # Create transaction without derived fields
+        create_response = client.post(
+            "/api/transactions",
+            headers=auth_headers,
+            json={
+                "account_id": account_id,
+                "amount": -50.00,
+                "date": str(date.today()),
+                "category": "groceries",
+                "merchant": "Whole Foods Market",
+            },
+        )
+        transaction_id = create_response.json()["id"]
+
+        # Update with derived fields
+        response = client.patch(
+            f"/api/transactions/{transaction_id}",
+            headers=auth_headers,
+            json={
+                "der_category": "food",
+                "der_merchant": "Whole Foods",
+            },
+        )
+
+        assert response.status_code == 200
+        transaction = response.json()
+        assert transaction["der_category"] == "food"
+        assert transaction["der_merchant"] == "Whole Foods"
+        # Original fields should be unchanged
+        assert transaction["category"] == "groceries"
+        assert transaction["merchant"] == "Whole Foods Market"
 
 
 class TestTransactionDeletion:

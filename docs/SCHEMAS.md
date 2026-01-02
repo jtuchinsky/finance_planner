@@ -68,13 +68,16 @@ The Finance Planner uses a relational database with three core tables designed f
 │    │ merchant           │
 │    │ location           │
 │    │ tags               │◄────── JSON array
+│ IDX│ der_category       │◄────── Derived/calculated category
+│    │ der_merchant       │◄────── Derived/calculated merchant
 │    │ created_at         │
 │    │ updated_at         │
 └─────────────────────────┘
 
 Composite Indexes:
-  • (account_id, date)     - Date range queries per account
-  • (account_id, category) - Category filtering per account
+  • (account_id, date)         - Date range queries per account
+  • (account_id, category)     - Category filtering per account
+  • (account_id, der_category) - Derived category filtering per account
 ```
 
 ### Mermaid Diagram
@@ -111,6 +114,8 @@ erDiagram
         string merchant "Optional"
         string location "Optional"
         json tags "Array of strings"
+        string der_category "Indexed, derived/calculated category"
+        string der_merchant "Optional, derived/calculated merchant"
         datetime created_at
         datetime updated_at
     }
@@ -221,6 +226,8 @@ erDiagram
 | `merchant` | String(255) | NULLABLE | Optional merchant name (e.g., "Whole Foods") |
 | `location` | String(255) | NULLABLE | Optional location (e.g., "Seattle, WA") |
 | `tags` | JSON | NULLABLE, DEFAULT [] | Array of string tags for flexible categorization |
+| `der_category` | String(100) | NULLABLE, INDEXED | Derived/calculated category (from ML/AI, manual overrides, or normalized values) |
+| `der_merchant` | String(255) | NULLABLE | Derived/calculated merchant (from ML/AI, manual overrides, or normalized values) |
 | `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
 | `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
 
@@ -240,10 +247,12 @@ erDiagram
 - **INDEX** on `account_id` (required for FK constraint)
 - **INDEX** on `date` (enables efficient date range queries)
 - **INDEX** on `category` (enables fast category filtering)
+- **INDEX** on `der_category` (enables fast derived category filtering)
 
 **Composite Indexes:**
 - **INDEX** `ix_transactions_account_date` on (`account_id`, `date`) - Optimizes date range queries per account
 - **INDEX** `ix_transactions_account_category` on (`account_id`, `category`) - Optimizes category filtering per account
+- **INDEX** `ix_transactions_account_der_category` on (`account_id`, `der_category`) - Optimizes derived category filtering per account
 
 #### Foreign Keys
 
@@ -388,8 +397,10 @@ Indexes dramatically improve query performance for common operations in the Fina
 | `transactions` | `account_id` | INDEX | FK constraint + transaction filtering |
 | `transactions` | `date` | INDEX | Date range queries |
 | `transactions` | `category` | INDEX | Category filtering |
+| `transactions` | `der_category` | INDEX | Derived category filtering |
 | `transactions` | `(account_id, date)` | COMPOSITE INDEX | Date range queries per account |
 | `transactions` | `(account_id, category)` | COMPOSITE INDEX | Category filtering per account |
+| `transactions` | `(account_id, der_category)` | COMPOSITE INDEX | Derived category filtering per account |
 
 ### Composite Index Details
 
@@ -640,6 +651,6 @@ The Finance Planner database schema is designed for:
 ✅ **Maintainability** - Clear relationships and well-documented design
 
 **Total Tables:** 3 (users, accounts, transactions)
-**Total Indexes:** 10 (including composite indexes)
+**Total Indexes:** 12 (including composite indexes)
 **Relationships:** 2 (User→Accounts, Accounts→Transactions)
 **Technology:** SQLAlchemy 2.0 + Alembic + PostgreSQL/SQLite

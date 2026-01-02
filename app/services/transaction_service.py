@@ -55,6 +55,8 @@ class TransactionService:
             merchant=transaction_data.merchant,
             location=transaction_data.location,
             tags=transaction_data.tags if transaction_data.tags else [],
+            der_category=transaction_data.der_category,
+            der_merchant=transaction_data.der_merchant,
         )
 
         transaction = self.transaction_repo.create(transaction)
@@ -93,6 +95,8 @@ class TransactionService:
         category: Optional[str] = None,
         merchant: Optional[str] = None,
         tags: Optional[list[str]] = None,
+        der_category: Optional[str] = None,
+        der_merchant: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[Transaction], int]:
@@ -129,6 +133,8 @@ class TransactionService:
             category=category,
             merchant=merchant,
             tags=tags,
+            der_category=der_category,
+            der_merchant=der_merchant,
             limit=limit,
             offset=offset,
         )
@@ -173,6 +179,10 @@ class TransactionService:
             transaction.location = transaction_data.location
         if transaction_data.tags is not None:
             transaction.tags = transaction_data.tags
+        if transaction_data.der_category is not None:
+            transaction.der_category = transaction_data.der_category
+        if transaction_data.der_merchant is not None:
+            transaction.der_merchant = transaction_data.der_merchant
 
         transaction = self.transaction_repo.update(transaction)
 

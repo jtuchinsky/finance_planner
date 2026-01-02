@@ -44,6 +44,8 @@ def list_transactions(
     tags: Optional[str] = Query(
         None, description="Comma-separated list of tags (matches ANY)"
     ),
+    der_category: Optional[str] = Query(None, description="Filter by derived category"),
+    der_merchant: Optional[str] = Query(None, description="Filter by derived merchant (partial match)"),
     limit: int = Query(100, ge=1, le=1000, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
     db: Session = Depends(get_db),
@@ -69,6 +71,8 @@ def list_transactions(
         category=category,
         merchant=merchant,
         tags=tags_list,
+        der_category=der_category,
+        der_merchant=der_merchant,
         limit=limit,
         offset=offset,
     )

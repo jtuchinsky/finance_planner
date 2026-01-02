@@ -14,6 +14,8 @@ class TransactionCreate(BaseModel):
     merchant: Optional[str] = Field(None, max_length=255)
     location: Optional[str] = Field(None, max_length=255)
     tags: Optional[list[str]] = Field(default_factory=list)
+    der_category: Optional[str] = Field(None, max_length=100)
+    der_merchant: Optional[str] = Field(None, max_length=255)
 
 
 class TransactionUpdate(BaseModel):
@@ -26,6 +28,8 @@ class TransactionUpdate(BaseModel):
     merchant: Optional[str] = Field(None, max_length=255)
     location: Optional[str] = Field(None, max_length=255)
     tags: Optional[list[str]] = None
+    der_category: Optional[str] = Field(None, max_length=100)
+    der_merchant: Optional[str] = Field(None, max_length=255)
 
 
 class TransactionResponse(BaseModel):
@@ -42,6 +46,8 @@ class TransactionResponse(BaseModel):
     merchant: Optional[str]
     location: Optional[str]
     tags: Optional[list[str]]
+    der_category: Optional[str]
+    der_merchant: Optional[str]
     created_at: datetime
     updated_at: datetime
 
@@ -62,5 +68,7 @@ class TransactionFilter(BaseModel):
     category: Optional[str] = None
     merchant: Optional[str] = None
     tags: Optional[list[str]] = None
+    der_category: Optional[str] = None
+    der_merchant: Optional[str] = None
     limit: int = Field(default=100, ge=1, le=1000)
     offset: int = Field(default=0, ge=0)

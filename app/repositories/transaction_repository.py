@@ -61,6 +61,8 @@ class TransactionRepository:
         category: Optional[str] = None,
         merchant: Optional[str] = None,
         tags: Optional[list[str]] = None,
+        der_category: Optional[str] = None,
+        der_merchant: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[Transaction], int]:
@@ -86,6 +88,12 @@ class TransactionRepository:
 
         if merchant is not None:
             query = query.filter(Transaction.merchant.ilike(f"%{merchant}%"))
+
+        if der_category is not None:
+            query = query.filter(Transaction.der_category == der_category)
+
+        if der_merchant is not None:
+            query = query.filter(Transaction.der_merchant.ilike(f"%{der_merchant}%"))
 
         if tags is not None and len(tags) > 0:
             # Filter for transactions that have ANY of the provided tags

@@ -33,6 +33,10 @@ class Transaction(Base, TimestampMixin):
     location: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list[str] | None] = mapped_column(JSON, nullable=True, default=list)
 
+    # Derived/calculated fields (from ML/AI, manual overrides, or normalized values)
+    der_category: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    der_merchant: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Relationships
     account: Mapped["Account"] = relationship("Account", back_populates="transactions")
 
@@ -40,4 +44,5 @@ class Transaction(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_transactions_account_date", "account_id", "date"),
         Index("ix_transactions_account_category", "account_id", "category"),
+        Index("ix_transactions_account_der_category", "account_id", "der_category"),
     )
