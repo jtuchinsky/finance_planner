@@ -188,21 +188,19 @@ See `docs/PLAN.md` for comprehensive deployment guide including:
 ## Project Status
 
 **Completed:**
--  JWT authentication integration
--  Multi-tenant user management
--  Account CRUD API
--  Database migrations
--  OpenAPI documentation
-
-**In Progress:**
-- =( Transaction management
-- =( Balance calculations
-- =( Test suite
+- ✅ JWT authentication integration
+- ✅ Multi-tenant user management
+- ✅ Account CRUD API
+- ✅ Transaction CRUD API with derived fields (der_category, der_merchant)
+- ✅ Balance calculations with automatic updates
+- ✅ Database migrations
+- ✅ OpenAPI documentation
+- ✅ Comprehensive test suite (74/74 tests passing)
 
 **Planned:**
-- =� Analytics endpoints
-- =� Bulk operations
-- =� Export/import features
+- 📊 Analytics endpoints
+- 📦 Bulk operations
+- 📤 Export/import features
 
 ## Security
 
