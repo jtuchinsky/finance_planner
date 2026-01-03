@@ -8,6 +8,8 @@ A step-by-step guide to get Finance Planner and MCP_Auth running and test the AP
 2. Start Finance Planner in Terminal 2 (port 8000)
 3. Get a JWT token from MCP_Auth
 4. Create and manage accounts using the Finance Planner API
+5. Add transactions and see automatic balance updates
+6. Try batch transaction import (1-100 transactions atomically)
 
 ## Prerequisites
 
@@ -464,7 +466,188 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
 
 ---
 
-## Part 6: Troubleshooting Common Issues
+## Part 6: Workflow 2 - Transaction Management
+
+Now let's add some transactions and see automatic balance updates!
+
+### Test 1: Add a Grocery Transaction (Expense)
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account_id": 1,
+    "amount": -150.00,
+    "date": "2026-01-03",
+    "category": "groceries",
+    "merchant": "Whole Foods",
+    "description": "Weekly grocery shopping"
+  }'
+```
+
+**Expected Response:**
+```json
+{
+  "id": 1,
+  "account_id": 1,
+  "amount": -150.0,
+  "date": "2026-01-03",
+  "category": "groceries",
+  "merchant": "Whole Foods",
+  "description": "Weekly grocery shopping",
+  "location": null,
+  "tags": [],
+  "der_category": null,
+  "der_merchant": null,
+  "created_at": "2026-01-03T12:00:00",
+  "updated_at": "2026-01-03T12:00:00"
+}
+```
+
+**Check updated balance:**
+```bash
+curl -X GET http://127.0.0.1:8000/api/accounts/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected balance:** `4850.00` (5000.00 - 150.00)
+
+✅ **Balance automatically updated!**
+
+### Test 2: Add Income Transaction
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/transactions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account_id": 1,
+    "amount": 2500.00,
+    "date": "2026-01-01",
+    "category": "income",
+    "description": "Monthly salary deposit"
+  }'
+```
+
+**Expected balance after this:** `7350.00` (4850.00 + 2500.00)
+
+### Test 3: List All Transactions
+
+```bash
+curl -X GET "http://127.0.0.1:8000/api/transactions?account_id=1" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected Response:**
+```json
+{
+  "transactions": [
+    {
+      "id": 2,
+      "account_id": 1,
+      "amount": 2500.0,
+      "date": "2026-01-01",
+      "category": "income",
+      "description": "Monthly salary deposit",
+      ...
+    },
+    {
+      "id": 1,
+      "account_id": 1,
+      "amount": -150.0,
+      "date": "2026-01-03",
+      "category": "groceries",
+      ...
+    }
+  ],
+  "total": 2,
+  "limit": 100,
+  "offset": 0
+}
+```
+
+### Test 4: Batch Transaction Import (NEW!)
+
+Import multiple transactions at once (1-100 transactions atomically):
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/transactions/batch \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account_id": 1,
+    "transactions": [
+      {"amount": -50.00, "date": "2026-01-02", "category": "gas", "merchant": "Shell"},
+      {"amount": -30.00, "date": "2026-01-02", "category": "dining", "merchant": "Chipotle"},
+      {"amount": -80.00, "date": "2026-01-03", "category": "utilities", "merchant": "PG&E"},
+      {"amount": -1200.00, "date": "2026-01-01", "category": "rent", "merchant": "Landlord"}
+    ]
+  }'
+```
+
+**Expected Response:**
+```json
+{
+  "transactions": [
+    { "id": 3, "amount": -50.0, "category": "gas", ... },
+    { "id": 4, "amount": -30.0, "category": "dining", ... },
+    { "id": 5, "amount": -80.0, "category": "utilities", ... },
+    { "id": 6, "amount": -1200.0, "category": "rent", ... }
+  ],
+  "account_balance": 5990.0,
+  "total_amount": -1360.0,
+  "count": 4
+}
+```
+
+✅ **4 transactions created atomically!** Balance updated once: `5990.00`
+
+**Benefits of batch import:**
+- ⚡ Much faster than individual transactions (single database commit)
+- 🔒 All-or-nothing atomicity (if one fails, all rollback)
+- 📊 Perfect for importing CSV data or historical transactions
+- 🎯 Supports 1-100 transactions per batch
+
+### Test 5: Filter Transactions by Category
+
+```bash
+curl -X GET "http://127.0.0.1:8000/api/transactions?category=groceries" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Test 6: Filter by Date Range
+
+```bash
+curl -X GET "http://127.0.0.1:8000/api/transactions?start_date=2026-01-01&end_date=2026-01-31" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Test 7: Update Transaction Amount
+
+```bash
+curl -X PATCH http://127.0.0.1:8000/api/transactions/1 \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": -175.00
+  }'
+```
+
+✅ **Balance automatically recalculated!** Old amount removed, new amount added.
+
+### Test 8: Delete Transaction
+
+```bash
+curl -X DELETE http://127.0.0.1:8000/api/transactions/1 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+✅ **Transaction deleted and balance updated automatically!**
+
+---
+
+## Part 7: Troubleshooting Common Issues
 
 ### Issue 1: 307 Temporary Redirect
 
@@ -684,6 +867,8 @@ Congratulations! You've successfully:
 - ✅ Started both MCP_Auth and Finance Planner
 - ✅ Obtained a JWT token
 - ✅ Created, listed, updated, and deleted accounts
+- ✅ Added transactions with automatic balance updates
+- ✅ Tried batch transaction import (1-100 transactions atomically)
 
 ### Explore More
 
