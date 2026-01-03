@@ -122,17 +122,17 @@ app/
 │   └── transaction.py    # Transaction model
 ├── schemas/
 │   ├── account_schemas.py      # Pydantic request/response models
-│   └── transaction_schemas.py  # (coming soon)
+│   └── transaction_schemas.py  # Transaction schemas + batch operations
 ├── repositories/
 │   ├── user_repository.py      # User data access + auto-create
 │   ├── account_repository.py   # Account CRUD with user_id filtering
-│   └── transaction_repository.py # (coming soon)
+│   └── transaction_repository.py # Transaction CRUD + batch operations
 ├── services/
 │   ├── account_service.py      # Account business logic
-│   └── transaction_service.py  # (coming soon)
+│   └── transaction_service.py  # Transaction business logic + balance updates
 └── routes/
     ├── account_routes.py       # Account API endpoints
-    └── transaction_routes.py   # (coming soon)
+    └── transaction_routes.py   # Transaction API endpoints + batch creation
 ```
 
 ## Key Patterns and Conventions
@@ -209,9 +209,11 @@ raise ValidationException("Invalid amount")   # → 400
 - `amount`: Decimal(15,2) - positive=income, negative=expense
 - `date`: Date (indexed)
 - `category`: String (indexed)
+- `der_category`: Derived/normalized category (indexed)
+- `der_merchant`: Derived/normalized merchant
 - `description`, `merchant`, `location`: Optional text fields
 - `tags`: JSON array
-- Composite indexes: (account_id, date), (account_id, category)
+- Composite indexes: (account_id, date), (account_id, category), (account_id, der_category)
 
 ## Testing Strategy
 
@@ -278,6 +280,48 @@ When implementing transaction CRUD:
 - Update account.balance in same transaction
 - Consider reconciliation job for data integrity
 
+### Batch Operations
+The batch transaction creation endpoint demonstrates key patterns:
+
+```python
+# In TransactionService
+def create_transaction_batch(self, batch_data, user):
+    # 1. Verify account ownership
+    account = self.account_repo.get_by_id_and_user(batch_data.account_id, user.id)
+
+    # 2. Calculate total upfront (single balance update)
+    total_amount = sum(txn.amount for txn in batch_data.transactions)
+
+    try:
+        # 3. Bulk insert without committing
+        created_transactions = self.transaction_repo.create_bulk(transaction_objects)
+
+        # 4. Update balance without committing
+        account.balance = float(account.balance) + total_amount
+        self.account_repo.update_no_commit(account)
+
+        # 5. SINGLE ATOMIC COMMIT
+        self.db.commit()
+
+        # 6. Refresh all objects
+        self.db.refresh(account)
+        for txn in created_transactions:
+            self.db.refresh(txn)
+
+        return created_transactions, float(account.balance)
+
+    except Exception as e:
+        # 7. Explicit rollback on failure
+        self.db.rollback()
+        raise
+```
+
+**Key principles:**
+- Repository methods ending with `_no_commit()` for atomic operations
+- Service layer controls the transaction boundary (single commit)
+- Calculate aggregates upfront to minimize database operations
+- Explicit rollback on any failure for data integrity
+
 ## Security Considerations
 
 1. **JWT Validation**: SECRET_KEY must match MCP_Auth exactly
@@ -292,14 +336,20 @@ When implementing transaction CRUD:
 - JWT authentication integration with MCP_Auth
 - User auto-creation on first request
 - Account CRUD API (`/api/accounts`)
+- Transaction CRUD API (`/api/transactions`) with:
+  - Single transaction creation/update/delete with automatic balance updates
+  - Batch transaction creation (1-100 transactions atomically)
+  - Advanced filtering (date range, category, merchant, tags, derived fields)
+  - Pagination support
 - Multi-tenant data isolation
 - Database migrations
 - OpenAPI documentation
+- Comprehensive test suite (82/82 tests passing)
 
 **Next Steps:**
-- Transaction CRUD with balance calculations
-- Comprehensive test suite
-- Analytics endpoints (optional)
+- Analytics endpoints (spending reports, category summaries, trends)
+- Export/import features (CSV, JSON)
+- Advanced search and filtering capabilities
 - Docker deployment setup
 
 ## Troubleshooting

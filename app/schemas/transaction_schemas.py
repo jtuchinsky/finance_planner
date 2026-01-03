@@ -72,3 +72,33 @@ class TransactionFilter(BaseModel):
     der_merchant: Optional[str] = None
     limit: int = Field(default=100, ge=1, le=1000)
     offset: int = Field(default=0, ge=0)
+
+
+class TransactionBatchItem(BaseModel):
+    """Single transaction in batch (no account_id - shared by all)"""
+
+    amount: float = Field(..., description="Positive for income, negative for expense")
+    date: date
+    category: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=1000)
+    merchant: Optional[str] = Field(None, max_length=255)
+    location: Optional[str] = Field(None, max_length=255)
+    tags: Optional[list[str]] = Field(default_factory=list)
+    der_category: Optional[str] = Field(None, max_length=100)
+    der_merchant: Optional[str] = Field(None, max_length=255)
+
+
+class TransactionBatchCreate(BaseModel):
+    """Batch creation request"""
+
+    account_id: int = Field(..., gt=0)
+    transactions: list[TransactionBatchItem] = Field(..., min_length=1, max_length=100)
+
+
+class TransactionBatchResponse(BaseModel):
+    """Batch creation response"""
+
+    transactions: list[TransactionResponse]
+    account_balance: float
+    total_amount: float
+    count: int

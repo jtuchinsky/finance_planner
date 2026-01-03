@@ -20,6 +20,21 @@ class TransactionRepository:
         self.db.refresh(transaction)
         return transaction
 
+    def create_bulk(self, transactions: list[Transaction]) -> list[Transaction]:
+        """
+        Create multiple transactions without committing.
+        Caller responsible for commit. Enables atomic batch operations.
+        """
+        self.db.add_all(transactions)
+        self.db.flush()  # Assign IDs without committing
+        return transactions
+
+    def create_no_commit(self, transaction: Transaction) -> Transaction:
+        """Create single transaction without committing (for atomic ops)"""
+        self.db.add(transaction)
+        self.db.flush()
+        return transaction
+
     def get_by_id(self, transaction_id: int) -> Optional[Transaction]:
         """Get transaction by ID"""
         return self.db.query(Transaction).filter(Transaction.id == transaction_id).first()

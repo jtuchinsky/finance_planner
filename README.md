@@ -11,7 +11,8 @@ This is a FastAPI-based Resource Server that integrates with [MCP_Auth](https://
 - **JWT Authentication**: Validates access tokens from MCP_Auth using shared SECRET_KEY
 - **Multi-Tenant Architecture**: Complete data isolation per user
 - **Account Management**: Full CRUD operations for financial accounts
-- **Transaction Tracking**: Record income/expenses with detailed metadata (coming soon)
+- **Transaction Tracking**: Record income/expenses with detailed metadata
+- **Batch Operations**: Atomic batch transaction creation (1-100 transactions)
 - **Auto-User Creation**: First API request automatically creates user record
 - **RESTful API**: OpenAPI/Swagger documentation at `/docs`
 
@@ -130,6 +131,15 @@ All endpoints require `Authorization: Bearer <jwt_token>` header.
 - `PATCH /api/accounts/{id}` - Update account
 - `DELETE /api/accounts/{id}` - Delete account
 
+### Transactions (`/api/transactions`)
+
+- `POST /api/transactions` - Create single transaction
+- `POST /api/transactions/batch` - Create multiple transactions atomically (1-100)
+- `GET /api/transactions` - List transactions with filtering
+- `GET /api/transactions/{id}` - Get transaction details
+- `PATCH /api/transactions/{id}` - Update transaction
+- `DELETE /api/transactions/{id}` - Delete transaction
+
 ### Health Check
 
 - `GET /health` - Service health status
@@ -153,10 +163,11 @@ Tracks user_id from MCP_Auth (no passwords stored here)
 - name, account_type, balance
 - Cascade deletes to transactions
 
-### Transactions (coming soon)
+### Transactions
 - account_id (foreign key)
 - amount, date, category
 - description, merchant, location, tags
+- der_category, der_merchant (derived fields for normalization)
 
 ## Development
 
@@ -192,15 +203,16 @@ See `docs/PLAN.md` for comprehensive deployment guide including:
 - ✅ Multi-tenant user management
 - ✅ Account CRUD API
 - ✅ Transaction CRUD API with derived fields (der_category, der_merchant)
+- ✅ Batch transaction creation (atomic operations for 1-100 transactions)
 - ✅ Balance calculations with automatic updates
 - ✅ Database migrations
 - ✅ OpenAPI documentation
-- ✅ Comprehensive test suite (74/74 tests passing)
+- ✅ Comprehensive test suite (82/82 tests passing)
 
 **Planned:**
 - 📊 Analytics endpoints
-- 📦 Bulk operations
 - 📤 Export/import features
+- 🔍 Advanced filtering and search
 
 ## Security
 

@@ -948,3 +948,172 @@ class TestMultiTenancy:
             f"/api/transactions/{transaction_a['id']}", headers=user_a_headers
         )
         assert transaction_check.status_code == 200
+
+
+class TestBatchTransactionCreation:
+    """Tests for batch transaction creation endpoint"""
+
+    def test_create_batch_success(self, client, auth_headers):
+        """Successfully create multiple transactions atomically"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking", "initial_balance": 1000.00},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [
+                {"amount": -50.00, "date": str(date.today()), "category": "groceries", "merchant": "Whole Foods"},
+                {"amount": -30.00, "date": str(date.today()), "category": "gas", "merchant": "Shell"},
+                {"amount": 100.00, "date": str(date.today()), "category": "income", "description": "Freelance"},
+            ],
+        }
+
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["count"] == 3
+        assert data["total_amount"] == 20.00  # -50 -30 +100
+        assert data["account_balance"] == 1020.00  # 1000 + 20
+        assert len(data["transactions"]) == 3
+
+    def test_create_batch_updates_balance_atomically(self, client, auth_headers):
+        """Batch updates account balance exactly once"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking", "initial_balance": 500.00},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [
+                {"amount": -100.00, "date": str(date.today()), "category": "test"},
+                {"amount": -200.00, "date": str(date.today()), "category": "test"},
+                {"amount": -50.00, "date": str(date.today()), "category": "test"},
+            ],
+        }
+
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 201
+
+        account_response = client.get(f"/api/accounts/{account_id}", headers=auth_headers)
+        assert account_response.json()["balance"] == 150.00  # 500 - 350
+
+    def test_create_batch_minimum_one_transaction(self, client, auth_headers):
+        """Batch must contain at least 1 transaction"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {"account_id": account_id, "transactions": []}
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 422  # Pydantic validation
+
+    def test_create_batch_maximum_100_transactions(self, client, auth_headers):
+        """Batch cannot exceed 100 transactions"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [
+                {"amount": 1.00, "date": str(date.today()), "category": "test"}
+                for _ in range(101)
+            ],
+        }
+
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 422
+
+    def test_create_batch_exactly_100_transactions(self, client, auth_headers):
+        """Batch with exactly 100 transactions succeeds"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking", "initial_balance": 0.00},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [
+                {"amount": float(i), "date": str(date.today()), "category": "test"}
+                for i in range(100)
+            ],
+        }
+
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 201
+        assert response.json()["count"] == 100
+
+    def test_create_batch_invalid_account(self, client, auth_headers):
+        """Batch with invalid account_id returns 404"""
+        batch_data = {
+            "account_id": 99999,
+            "transactions": [{"amount": 50.00, "date": str(date.today()), "category": "test"}],
+        }
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 404
+
+    def test_create_batch_other_user_account(self, client, user_a_headers, user_b_headers):
+        """Cannot create batch for another user's account"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=user_a_headers,
+            json={"name": "User A Account", "account_type": "checking"},
+        )
+        account_id = account_response.json()["id"]
+
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [{"amount": 50.00, "date": str(date.today()), "category": "test"}],
+        }
+
+        response = client.post("/api/transactions/batch", headers=user_b_headers, json=batch_data)
+        assert response.status_code == 404  # Security: act like doesn't exist
+
+
+class TestBatchTransactionAtomicity:
+    """Critical atomicity tests - ensures data integrity"""
+
+    def test_batch_rollback_on_invalid_transaction(self, client, auth_headers):
+        """If any transaction invalid, entire batch rolled back"""
+        account_response = client.post(
+            "/api/accounts",
+            headers=auth_headers,
+            json={"name": "Test Account", "account_type": "checking", "initial_balance": 1000.00},
+        )
+        account_id = account_response.json()["id"]
+
+        # Second transaction has invalid category (empty)
+        batch_data = {
+            "account_id": account_id,
+            "transactions": [
+                {"amount": -50.00, "date": str(date.today()), "category": "groceries"},
+                {"amount": -30.00, "date": str(date.today()), "category": ""},  # INVALID
+                {"amount": -20.00, "date": str(date.today()), "category": "gas"},
+            ],
+        }
+
+        response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
+        assert response.status_code == 422
+
+        # Verify NO transactions created (atomicity)
+        list_response = client.get(f"/api/transactions?account_id={account_id}", headers=auth_headers)
+        assert list_response.json()["total"] == 0
+
+        # Verify balance unchanged
+        account_response = client.get(f"/api/accounts/{account_id}", headers=auth_headers)
+        assert account_response.json()["balance"] == 1000.00

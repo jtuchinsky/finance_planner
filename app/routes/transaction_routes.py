@@ -12,6 +12,8 @@ from app.schemas.transaction_schemas import (
     TransactionUpdate,
     TransactionResponse,
     TransactionListResponse,
+    TransactionBatchCreate,
+    TransactionBatchResponse,
 )
 
 router = APIRouter()
@@ -32,6 +34,33 @@ def create_transaction(
     """
     service = TransactionService(db)
     return service.create_transaction(transaction_data, current_user)
+
+
+@router.post("/batch", response_model=TransactionBatchResponse, status_code=status.HTTP_201_CREATED)
+def create_transaction_batch(
+    batch_data: TransactionBatchCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Create multiple transactions atomically for a single account.
+
+    - All transactions succeed or entire batch is rolled back
+    - Minimum 1, maximum 100 transactions per batch
+    - Updates account balance exactly once
+    - All transactions share the same account_id
+    """
+    service = TransactionService(db)
+    transactions, balance = service.create_transaction_batch(batch_data, current_user)
+
+    total_amount = sum(txn.amount for txn in transactions)
+
+    return TransactionBatchResponse(
+        transactions=transactions,
+        account_balance=balance,
+        total_amount=total_amount,
+        count=len(transactions),
+    )
 
 
 @router.get("/", response_model=TransactionListResponse)

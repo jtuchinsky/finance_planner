@@ -7,8 +7,8 @@ from app.models.account import Account
 from app.models.user import User
 from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.account_repository import AccountRepository
-from app.schemas.transaction_schemas import TransactionCreate, TransactionUpdate
-from app.core.exceptions import NotFoundException, ForbiddenException
+from app.schemas.transaction_schemas import TransactionCreate, TransactionUpdate, TransactionBatchCreate
+from app.core.exceptions import NotFoundException, ForbiddenException, ValidationException
 
 
 class TransactionService:
@@ -66,6 +66,76 @@ class TransactionService:
         self.account_repo.update(account)
 
         return transaction
+
+    def create_transaction_batch(
+        self, batch_data: TransactionBatchCreate, user: User
+    ) -> tuple[list[Transaction], float]:
+        """
+        Create multiple transactions atomically for a single account.
+        ALL-OR-NOTHING: Any failure rolls back entire batch.
+
+        Returns: (created_transactions, updated_account_balance)
+        Raises: NotFoundException, ForbiddenException, ValidationException
+        """
+        # 1. Verify account ownership
+        account = self.account_repo.get_by_id_and_user(
+            batch_data.account_id, user.id
+        )
+        if not account:
+            raise NotFoundException(
+                f"Account {batch_data.account_id} not found or access denied"
+            )
+
+        # 2. Validate batch size
+        if len(batch_data.transactions) < 1:
+            raise ValidationException("Batch must contain at least 1 transaction")
+        if len(batch_data.transactions) > 100:
+            raise ValidationException("Batch cannot exceed 100 transactions")
+
+        # 3. Calculate total balance delta
+        total_amount = sum(txn.amount for txn in batch_data.transactions)
+
+        try:
+            # 4. Create Transaction objects
+            transaction_objects = [
+                Transaction(
+                    account_id=batch_data.account_id,
+                    amount=txn.amount,
+                    date=txn.date,
+                    category=txn.category,
+                    description=txn.description,
+                    merchant=txn.merchant,
+                    location=txn.location,
+                    tags=txn.tags if txn.tags else [],
+                    der_category=txn.der_category,
+                    der_merchant=txn.der_merchant,
+                )
+                for txn in batch_data.transactions
+            ]
+
+            # 5. Bulk insert (no commit)
+            created_transactions = self.transaction_repo.create_bulk(transaction_objects)
+
+            # 6. Update balance once
+            account.balance = float(account.balance) + total_amount
+            self.account_repo.update_no_commit(account)
+
+            # 7. ATOMIC COMMIT - all or nothing
+            self.db.commit()
+
+            # 8. Refresh to get DB-generated values
+            self.db.refresh(account)
+            for txn in created_transactions:
+                self.db.refresh(txn)
+
+            return created_transactions, float(account.balance)
+
+        except Exception as e:
+            # Rollback entire batch
+            self.db.rollback()
+            if isinstance(e, (NotFoundException, ForbiddenException, ValidationException)):
+                raise
+            raise ValidationException(f"Batch creation failed: {str(e)}")
 
     def get_transaction(self, transaction_id: int, user: User) -> Transaction:
         """

@@ -37,6 +37,11 @@ class AccountRepository:
         self.db.refresh(account)
         return account
 
+    def update_no_commit(self, account: Account) -> Account:
+        """Update account without committing. Caller responsible for commit."""
+        self.db.flush()
+        return account
+
     def delete(self, account: Account) -> None:
         """Delete account (cascades to transactions)"""
         self.db.delete(account)
