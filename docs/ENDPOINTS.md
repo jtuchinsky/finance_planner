@@ -6,6 +6,13 @@ Complete documentation of all REST API endpoints with sequence diagrams showing 
 
 - [Architecture Overview](#architecture-overview)
 - [Authentication Flow](#authentication-flow)
+- [Tenant Endpoints](#tenant-endpoints)
+  - [Get Current Tenant](#1-get-current-tenant)
+  - [Update Tenant](#2-update-tenant)
+  - [List Members](#3-list-members)
+  - [Invite Member](#4-invite-member)
+  - [Update Member Role](#5-update-member-role)
+  - [Remove Member](#6-remove-member)
 - [Account Endpoints](#account-endpoints)
   - [Create Account](#1-create-account)
   - [List Accounts](#2-list-accounts)
@@ -30,57 +37,291 @@ All endpoints follow the same layered architecture:
 Client → Route → Service → Repository → Database
          ↓
     Authentication
-    (get_current_user)
+    (get_tenant_context)
 ```
 
 **Layers:**
-- **Route**: FastAPI endpoint with dependency injection (authentication, database session)
-- **Service**: Business logic, validation, orchestration
-- **Repository**: Data access with multi-tenant filtering
+- **Route**: FastAPI endpoint with dependency injection (tenant context, database session)
+- **Service**: Business logic, validation, orchestration, permission checks
+- **Repository**: Data access with tenant-based filtering
 - **Database**: SQLAlchemy ORM models and PostgreSQL/SQLite
 
 **Common Dependencies:**
-- `get_current_user`: JWT authentication via MCP_Auth integration
+- `get_tenant_context`: JWT authentication + tenant context via MCP_Auth integration
 - `get_db`: Database session management
+
+**Multi-Tenant Architecture:**
+- Tenant is the isolation boundary (not User)
+- All accounts and transactions belong to a tenant (family/household)
+- Users access data through TenantMembership with role-based permissions
+- Four-tier role hierarchy: OWNER > ADMIN > MEMBER > VIEWER
 
 ---
 
 ## Authentication Flow
 
-All endpoints require JWT authentication. The authentication flow is shared across all endpoints:
+All endpoints require JWT authentication with tenant context. The authentication flow is shared across all endpoints:
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant Route
-    participant Auth as get_current_user
+    participant Auth as get_tenant_context
     participant JWT as JWT Decoder
     participant UserRepo as UserRepository
+    participant TenantRepo as TenantRepository
+    participant MemberRepo as TenantMembershipRepository
     participant DB as Database
 
     Client->>Route: Request with Authorization: Bearer <token>
-    Route->>Auth: Depends(get_current_user)
+    Route->>Auth: Depends(get_tenant_context)
     Auth->>JWT: Decode JWT token
-    JWT->>Auth: Extract user_id from 'sub' claim
-    Auth->>UserRepo: get_or_create_user(user_id)
-    UserRepo->>DB: SELECT User WHERE id = user_id
+    JWT->>Auth: Extract user_id ('sub') and tenant_id claims
+
+    Auth->>UserRepo: get_or_create_by_auth_id(user_id)
+    UserRepo->>DB: SELECT User WHERE auth_user_id = ?
 
     alt User exists
         DB-->>UserRepo: Return User
     else User not found (first request)
-        UserRepo->>DB: INSERT User(id=user_id)
+        UserRepo->>DB: INSERT User(auth_user_id=user_id)
         DB-->>UserRepo: Return new User
     end
 
     UserRepo-->>Auth: Return User object
-    Auth-->>Route: Inject User as current_user
-    Route->>Route: Process request with authenticated user
+
+    Auth->>TenantRepo: get_by_id(tenant_id)
+    TenantRepo->>DB: SELECT Tenant WHERE id = tenant_id
+
+    alt Tenant not found
+        TenantRepo-->>Auth: Return None
+        Auth->>Route: 404 Tenant not found
+        Route-->>Client: 404 Not Found
+    end
+
+    DB-->>TenantRepo: Return Tenant
+    TenantRepo-->>Auth: Return Tenant object
+
+    Auth->>MemberRepo: get_membership(user_id, tenant_id)
+    MemberRepo->>DB: SELECT TenantMembership<br/>WHERE user_id = ? AND tenant_id = ?
+
+    alt Membership not found
+        MemberRepo-->>Auth: Return None
+        Auth->>Route: 403 Not a member of tenant
+        Route-->>Client: 403 Forbidden
+    end
+
+    DB-->>MemberRepo: Return TenantMembership
+    MemberRepo-->>Auth: Return Membership with role
+
+    Auth->>Auth: Build TenantContext<br/>(user, tenant, role)
+    Auth-->>Route: Inject TenantContext
+    Route->>Route: Process request with tenant context<br/>and role-based permissions
 ```
 
 **Security Notes:**
 - Invalid/expired tokens → 401 Unauthorized
-- Multi-tenant isolation enforced at repository layer
+- Missing tenant_id in JWT → 401 Unauthorized
+- Tenant not found → 404 Not Found
+- User not a member of tenant → 403 Forbidden
+- Multi-tenant isolation enforced at repository layer using tenant_id
 - User records auto-created on first API request
+- Role-based permissions enforced at service layer
+
+**TenantContext Structure:**
+```python
+TenantContext(
+    user: User,           # Authenticated user
+    tenant: Tenant,       # Current tenant (family/household)
+    role: TenantRole     # User's role in this tenant
+)
+```
+
+**Permission Checks:**
+- `context.can_write()` → OWNER, ADMIN, MEMBER
+- `context.can_read()` → All roles
+- `context.is_admin_or_higher()` → OWNER, ADMIN
+- `context.is_owner()` → OWNER only
+
+---
+
+# Tenant Endpoints
+
+Base path: `/api/tenants`
+
+## 1. Get Current Tenant
+
+**Endpoint:** `GET /api/tenants/me`
+**Authentication:** Required
+**Response:** `TenantResponse` (200 OK)
+
+### Business Logic
+
+1. Returns tenant information from authenticated context
+2. All users can view their own tenant details
+
+### Example Response
+
+```json
+{
+  "id": 1,
+  "name": "Smith Family",
+  "created_at": "2026-01-05T12:00:00",
+  "updated_at": "2026-01-05T12:00:00"
+}
+```
+
+---
+
+## 2. Update Tenant
+
+**Endpoint:** `PATCH /api/tenants/me`
+**Authentication:** Required (OWNER only)
+**Request Body:** `TenantUpdate`
+**Response:** `TenantResponse` (200 OK)
+
+### Business Logic
+
+1. Checks `context.is_owner()` permission
+2. Updates tenant name
+3. Returns 403 if user is not OWNER
+
+### Example Request
+
+```json
+{
+  "name": "Smith-Johnson Family"
+}
+```
+
+---
+
+## 3. List Members
+
+**Endpoint:** `GET /api/tenants/me/members`
+**Authentication:** Required
+**Response:** `List[TenantMemberResponse]` (200 OK)
+
+### Business Logic
+
+1. Lists all members of current tenant with their roles
+2. Available to all tenant members
+3. Enriches with user auth_user_id for reference
+
+### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "user_id": 1,
+    "auth_user_id": "user-123",
+    "role": "owner",
+    "created_at": "2026-01-05T12:00:00"
+  },
+  {
+    "id": 2,
+    "user_id": 2,
+    "auth_user_id": "user-456",
+    "role": "member",
+    "created_at": "2026-01-06T10:00:00"
+  }
+]
+```
+
+---
+
+## 4. Invite Member
+
+**Endpoint:** `POST /api/tenants/me/members`
+**Authentication:** Required (ADMIN or OWNER)
+**Request Body:** `TenantInviteRequest`
+**Response:** `TenantMemberResponse` (201 Created)
+
+### Business Logic
+
+1. Checks `context.is_admin_or_higher()` permission
+2. Gets or creates user by auth_user_id
+3. Validates user is not already a member
+4. Only OWNER can invite as OWNER role
+5. Creates TenantMembership with specified role
+
+### Example Request
+
+```json
+{
+  "auth_user_id": "user-789",
+  "role": "member"
+}
+```
+
+### Permission Rules
+
+- ADMIN can invite as: ADMIN, MEMBER, VIEWER
+- ADMIN cannot invite as: OWNER
+- OWNER can invite as: Any role
+
+---
+
+## 5. Update Member Role
+
+**Endpoint:** `PATCH /api/tenants/me/members/{user_id}/role`
+**Authentication:** Required (OWNER only)
+**Request Body:** `TenantRoleUpdate`
+**Response:** `TenantMemberResponse` (200 OK)
+
+### Business Logic
+
+1. Checks `context.is_owner()` permission
+2. Verifies membership exists
+3. Prevents changing own role
+4. Prevents changing OWNER role
+5. Updates membership role
+
+### Example Request
+
+```json
+{
+  "role": "admin"
+}
+```
+
+### Restrictions
+
+- Cannot change OWNER's role
+- Cannot change own role
+- Only OWNER can change roles
+
+---
+
+## 6. Remove Member
+
+**Endpoint:** `DELETE /api/tenants/me/members/{user_id}`
+**Authentication:** Required (ADMIN or OWNER)
+**Response:** `TenantMemberRemoveResponse` (200 OK)
+
+### Business Logic
+
+1. Checks `context.is_admin_or_higher()` permission
+2. Verifies membership exists
+3. Prevents removing self
+4. Prevents removing OWNER
+5. Deletes membership
+
+### Example Response
+
+```json
+{
+  "message": "Member removed successfully",
+  "removed_user_id": 2
+}
+```
+
+### Restrictions
+
+- Cannot remove OWNER
+- Cannot remove self
+- ADMIN and OWNER can remove others
 
 ---
 
@@ -106,14 +347,15 @@ sequenceDiagram
     participant DB as Database
 
     Client->>Route: POST /api/accounts<br/>{name, account_type, initial_balance}
-    Note over Route: get_current_user()<br/>Injects authenticated User
-    Route->>Service: create_account(data, user)
+    Note over Route: get_tenant_context()<br/>Injects TenantContext (user, tenant, role)
+    Route->>Service: create_account(data, context)
 
+    Service->>Service: Check context.can_write()<br/>(MEMBER+ required)
     Service->>Service: Validate account_type<br/>(checking, savings, credit, investment)
     Service->>Service: Set balance = initial_balance ?? 0.0
 
     Service->>Repo: create(account)
-    Repo->>DB: INSERT INTO accounts<br/>(user_id, name, type, balance)
+    Repo->>DB: INSERT INTO accounts<br/>(tenant_id, user_id, name, type, balance)
     DB-->>Repo: Return Account with ID
     Repo->>DB: COMMIT
     Repo-->>Service: Return Account
@@ -124,10 +366,17 @@ sequenceDiagram
 
 ### Business Logic
 
-1. Validates `account_type` against allowed values
-2. Sets `initial_balance` to 0.0 if not provided
-3. Associates account with authenticated user
-4. Returns created account with generated ID
+1. Checks `context.can_write()` permission (OWNER, ADMIN, MEMBER)
+2. Validates `account_type` against allowed values
+3. Sets `initial_balance` to 0.0 if not provided
+4. Associates account with current tenant (shared with all members)
+5. Records creating user for audit trail
+6. Returns created account with generated ID
+
+### Permission Requirements
+
+- **Required role**: MEMBER or higher
+- **Forbidden for**: VIEWER (read-only)
 
 ### Validation Rules
 
@@ -155,11 +404,11 @@ sequenceDiagram
     participant DB as Database
 
     Client->>Route: GET /api/accounts
-    Note over Route: get_current_user()<br/>Injects authenticated User
-    Route->>Service: get_user_accounts(user)
+    Note over Route: get_tenant_context()<br/>Injects TenantContext (user, tenant, role)
+    Route->>Service: get_tenant_accounts(context)
 
-    Service->>Repo: get_all_by_user(user.id)
-    Repo->>DB: SELECT * FROM accounts<br/>WHERE user_id = ?<br/>ORDER BY created_at DESC
+    Service->>Repo: get_by_tenant(context.tenant.id)
+    Repo->>DB: SELECT * FROM accounts<br/>WHERE tenant_id = ?<br/>ORDER BY created_at DESC
     DB-->>Repo: Return list of Accounts
     Repo-->>Service: Return Accounts[]
 
@@ -170,15 +419,18 @@ sequenceDiagram
 
 ### Business Logic
 
-1. Fetches all accounts belonging to authenticated user
+1. Fetches all accounts belonging to current tenant (shared with all members)
 2. Results ordered by creation date (newest first)
 3. Returns total count for pagination/UI
+4. All tenant members can view accounts (including VIEWER)
 
 ### Multi-Tenant Isolation
 
-- Repository enforces `WHERE user_id = ?` filter
-- User can ONLY see their own accounts
-- No cross-user data leakage possible
+- Repository enforces `WHERE tenant_id = ?` filter
+- Users can see all accounts within their tenant (shared family/household)
+- Complete isolation between different tenants
+- No cross-tenant data leakage possible
+- Permission checks ensure VIEWER cannot modify data
 
 ---
 
@@ -607,8 +859,10 @@ sequenceDiagram
 ### Multi-Tenant Security
 
 - Always joins with accounts table: `JOIN accounts ON transactions.account_id = accounts.id`
-- Filters by `accounts.user_id = current_user.id`
-- User can ONLY see transactions from their own accounts
+- Filters by `accounts.tenant_id = context.tenant.id`
+- Users can see transactions from all tenant accounts (shared family/household)
+- Complete isolation between different tenants
+- Permission checks ensure VIEWER cannot modify transactions
 
 ---
 
@@ -868,7 +1122,8 @@ Recommended indexes for optimal query performance:
 
 ```sql
 -- Multi-tenant security (critical)
-CREATE INDEX idx_accounts_user_id ON accounts(user_id);
+CREATE INDEX idx_accounts_tenant_id ON accounts(tenant_id);
+CREATE UNIQUE INDEX idx_tenant_memberships_tenant_user ON tenant_memberships(tenant_id, user_id);
 CREATE INDEX idx_transactions_account_id ON transactions(account_id);
 
 -- Transaction filtering
@@ -879,6 +1134,8 @@ CREATE INDEX idx_transactions_der_category ON transactions(der_category);
 
 -- Composite for common queries
 CREATE INDEX idx_transactions_account_date ON transactions(account_id, date DESC);
+CREATE INDEX idx_transactions_account_category ON transactions(account_id, category);
+CREATE INDEX idx_transactions_account_der_category ON transactions(account_id, der_category);
 ```
 
 ### Batch Operations
@@ -900,17 +1157,20 @@ For importing large datasets:
 
 ## Testing
 
-All endpoints have comprehensive test coverage. See `tests/test_accounts.py` and `tests/test_transactions.py`.
+All endpoints have comprehensive test coverage. See `tests/test_accounts.py`, `tests/test_transactions.py`, and `tests/test_tenant_management.py`.
 
 **Test Suite:**
-- 82/82 tests passing
-- Coverage includes: success cases, validation, multi-tenant security, atomicity, error handling
+- 106/106 tests passing
+  - 82 account/transaction tests
+  - 24 tenant management tests
+- Coverage includes: success cases, validation, multi-tenant security, role-based permissions, atomicity, error handling
 
 **Run Tests:**
 ```bash
 pytest
 pytest tests/test_accounts.py -v
 pytest tests/test_transactions.py::TestBatchTransactionCreation -v
+pytest tests/test_tenant_management.py -v
 ```
 
 ---
