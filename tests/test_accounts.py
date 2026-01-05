@@ -228,91 +228,91 @@ class TestAccountDeletion:
 
 
 class TestMultiTenancy:
-    """Critical tests for multi-tenant data isolation"""
+    """Critical tests for cross-tenant data isolation"""
 
-    def test_users_see_only_own_accounts(self, client, user_a_headers, user_b_headers):
-        """Users should only see their own accounts"""
-        # User A creates accounts
+    def test_users_see_only_own_accounts(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """Users in different tenants should only see their own tenant's accounts"""
+        # User A (Tenant A) creates accounts
         client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "A's Checking", "account_type": "checking"},
         )
         client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "A's Savings", "account_type": "savings"},
         )
 
-        # User B creates account
+        # User B (Tenant B) creates account
         client.post(
             "/api/accounts",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={"name": "B's Checking", "account_type": "checking"},
         )
 
-        # User A should only see their 2 accounts
-        response_a = client.get("/api/accounts", headers=user_a_headers)
+        # User A should only see their tenant's 2 accounts
+        response_a = client.get("/api/accounts", headers=user_a_tenant_a_headers)
         assert response_a.json()["total"] == 2
 
-        # User B should only see their 1 account
-        response_b = client.get("/api/accounts", headers=user_b_headers)
+        # User B should only see their tenant's 1 account
+        response_b = client.get("/api/accounts", headers=user_b_tenant_b_headers)
         assert response_b.json()["total"] == 1
 
-    def test_user_cannot_access_other_user_account(self, client, user_a_headers, user_b_headers):
-        """User cannot access another user's account by ID"""
-        # User A creates account
+    def test_user_cannot_access_other_user_account(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot access Tenant A's account by ID"""
+        # User A (Tenant A) creates account
         response_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "A's Account", "account_type": "checking"},
         )
         account_id = response_a.json()["id"]
 
-        # User B tries to access User A's account
-        response_b = client.get(f"/api/accounts/{account_id}", headers=user_b_headers)
+        # User B (Tenant B) tries to access Tenant A's account
+        response_b = client.get(f"/api/accounts/{account_id}", headers=user_b_tenant_b_headers)
 
         # Must return 404 (not 403) to avoid revealing account existence
         assert response_b.status_code == 404
 
-    def test_user_cannot_update_other_user_account(self, client, user_a_headers, user_b_headers):
-        """User cannot update another user's account"""
-        # User A creates account
+    def test_user_cannot_update_other_user_account(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot update Tenant A's account"""
+        # User A (Tenant A) creates account
         response_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "A's Account", "account_type": "checking"},
         )
         account_id = response_a.json()["id"]
 
-        # User B tries to update User A's account
+        # User B (Tenant B) tries to update Tenant A's account
         response_b = client.patch(
             f"/api/accounts/{account_id}",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={"name": "Hacked Name"},
         )
 
         assert response_b.status_code == 404
 
         # Verify account name unchanged
-        response_a_check = client.get(f"/api/accounts/{account_id}", headers=user_a_headers)
+        response_a_check = client.get(f"/api/accounts/{account_id}", headers=user_a_tenant_a_headers)
         assert response_a_check.json()["name"] == "A's Account"
 
-    def test_user_cannot_delete_other_user_account(self, client, user_a_headers, user_b_headers):
-        """User cannot delete another user's account"""
-        # User A creates account
+    def test_user_cannot_delete_other_user_account(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot delete Tenant A's account"""
+        # User A (Tenant A) creates account
         response_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "A's Account", "account_type": "checking"},
         )
         account_id = response_a.json()["id"]
 
-        # User B tries to delete User A's account
-        response_b = client.delete(f"/api/accounts/{account_id}", headers=user_b_headers)
+        # User B (Tenant B) tries to delete Tenant A's account
+        response_b = client.delete(f"/api/accounts/{account_id}", headers=user_b_tenant_b_headers)
 
         assert response_b.status_code == 404
 
         # Verify account still exists for User A
-        response_a_check = client.get(f"/api/accounts/{account_id}", headers=user_a_headers)
+        response_a_check = client.get(f"/api/accounts/{account_id}", headers=user_a_tenant_a_headers)
         assert response_a_check.status_code == 200

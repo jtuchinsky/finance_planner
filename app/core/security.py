@@ -39,3 +39,46 @@ def extract_user_id(token: str) -> str:
     """Extract auth_user_id from JWT token"""
     payload = decode_jwt(token)
     return payload["sub"]
+
+
+def extract_tenant_id(token: str) -> str:
+    """
+    Extract tenant_id from JWT (provided by MCP_Auth).
+
+    Args:
+        token: JWT access token
+
+    Returns:
+        Tenant ID as string
+
+    Raises:
+        UnauthorizedException: If tenant_id claim missing
+    """
+    payload = decode_jwt(token)
+    tenant_id = payload.get("tenant_id")
+    if tenant_id is None:
+        raise UnauthorizedException("Token missing tenant_id claim")
+    return tenant_id
+
+
+def extract_user_and_tenant(token: str) -> tuple[str, str]:
+    """
+    Extract both user_id and tenant_id from JWT.
+
+    Args:
+        token: JWT access token
+
+    Returns:
+        Tuple of (auth_user_id, tenant_id)
+
+    Raises:
+        UnauthorizedException: If either claim is missing
+    """
+    payload = decode_jwt(token)
+    user_id = payload.get("sub")
+    tenant_id = payload.get("tenant_id")
+
+    if not user_id or not tenant_id:
+        raise UnauthorizedException("Invalid token claims")
+
+    return user_id, tenant_id

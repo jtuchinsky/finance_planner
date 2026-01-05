@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.models.transaction import Transaction
 from app.models.account import Account
 from app.models.user import User
+from app.models.tenant_context import TenantContext
 from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.account_repository import AccountRepository
 from app.schemas.transaction_schemas import TransactionCreate, TransactionUpdate, TransactionBatchCreate
@@ -20,25 +21,28 @@ class TransactionService:
         self.account_repo = AccountRepository(db)
 
     def create_transaction(
-        self, transaction_data: TransactionCreate, user: User
+        self, transaction_data: TransactionCreate, context: TenantContext
     ) -> Transaction:
         """
         Create a new transaction and update account balance atomically.
 
         Args:
             transaction_data: Transaction creation data
-            user: Current user (for ownership verification)
+            context: Tenant context
 
         Returns:
             Created transaction
 
         Raises:
             NotFoundException: If account doesn't exist
-            ForbiddenException: If account doesn't belong to user
+            ForbiddenException: If user lacks write permissions or account doesn't belong to tenant
         """
-        # Verify account exists and belongs to user
-        account = self.account_repo.get_by_id_and_user(
-            transaction_data.account_id, user.id
+        if not context.can_write():
+            raise ForbiddenException("Insufficient permissions to create transactions")
+
+        # Verify account exists and belongs to tenant
+        account = self.account_repo.get_by_id_and_tenant(
+            transaction_data.account_id, context.tenant.id
         )
         if not account:
             raise NotFoundException(
@@ -68,18 +72,30 @@ class TransactionService:
         return transaction
 
     def create_transaction_batch(
-        self, batch_data: TransactionBatchCreate, user: User
+        self, batch_data: TransactionBatchCreate, context: TenantContext
     ) -> tuple[list[Transaction], float]:
         """
         Create multiple transactions atomically for a single account.
         ALL-OR-NOTHING: Any failure rolls back entire batch.
 
-        Returns: (created_transactions, updated_account_balance)
-        Raises: NotFoundException, ForbiddenException, ValidationException
+        Args:
+            batch_data: Batch creation data
+            context: Tenant context
+
+        Returns:
+            (created_transactions, updated_account_balance)
+
+        Raises:
+            NotFoundException: If account not found
+            ForbiddenException: If user lacks write permissions
+            ValidationException: If batch validation fails
         """
+        if not context.can_write():
+            raise ForbiddenException("Insufficient permissions to create transactions")
+
         # 1. Verify account ownership
-        account = self.account_repo.get_by_id_and_user(
-            batch_data.account_id, user.id
+        account = self.account_repo.get_by_id_and_tenant(
+            batch_data.account_id, context.tenant.id
         )
         if not account:
             raise NotFoundException(
@@ -137,28 +153,30 @@ class TransactionService:
                 raise
             raise ValidationException(f"Batch creation failed: {str(e)}")
 
-    def get_transaction(self, transaction_id: int, user: User) -> Transaction:
+    def get_transaction(self, transaction_id: int, context: TenantContext) -> Transaction:
         """
-        Get transaction by ID with ownership verification.
+        Get transaction by ID with tenant ownership verification.
 
         Args:
             transaction_id: Transaction ID
-            user: Current user
+            context: Tenant context
 
         Returns:
-            Transaction
+            Transaction object
 
         Raises:
-            NotFoundException: If transaction doesn't exist or doesn't belong to user
+            NotFoundException: If transaction doesn't exist or doesn't belong to tenant
         """
-        transaction = self.transaction_repo.get_by_id_and_user(transaction_id, user.id)
+        transaction = self.transaction_repo.get_by_id_and_tenant(
+            transaction_id, context.tenant.id
+        )
         if not transaction:
             raise NotFoundException(f"Transaction {transaction_id} not found")
         return transaction
 
     def get_transactions(
         self,
-        user: User,
+        context: TenantContext,
         account_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -171,16 +189,18 @@ class TransactionService:
         offset: int = 0,
     ) -> tuple[list[Transaction], int]:
         """
-        Get transactions with filters.
+        Get transactions with filters for tenant.
 
         Args:
-            user: Current user
+            context: Tenant context
             account_id: Filter by account ID
             start_date: Filter by start date (inclusive)
             end_date: Filter by end date (inclusive)
             category: Filter by category
             merchant: Filter by merchant (partial match)
             tags: Filter by tags (any match)
+            der_category: Filter by derived category
+            der_merchant: Filter by derived merchant (partial match)
             limit: Max results to return
             offset: Pagination offset
 
@@ -189,14 +209,16 @@ class TransactionService:
         """
         # If account_id provided, verify ownership
         if account_id is not None:
-            account = self.account_repo.get_by_id_and_user(account_id, user.id)
+            account = self.account_repo.get_by_id_and_tenant(
+                account_id, context.tenant.id
+            )
             if not account:
                 raise NotFoundException(
                     f"Account {account_id} not found or access denied"
                 )
 
         return self.transaction_repo.get_with_filters(
-            user_id=user.id,
+            tenant_id=context.tenant.id,
             account_id=account_id,
             start_date=start_date,
             end_date=end_date,
@@ -210,7 +232,7 @@ class TransactionService:
         )
 
     def update_transaction(
-        self, transaction_id: int, transaction_data: TransactionUpdate, user: User
+        self, transaction_id: int, transaction_data: TransactionUpdate, context: TenantContext
     ) -> Transaction:
         """
         Update transaction and recalculate account balance if amount changed.
@@ -218,16 +240,22 @@ class TransactionService:
         Args:
             transaction_id: Transaction ID
             transaction_data: Updated transaction data
-            user: Current user
+            context: Tenant context
 
         Returns:
             Updated transaction
 
         Raises:
-            NotFoundException: If transaction doesn't exist or doesn't belong to user
+            NotFoundException: If transaction doesn't exist or doesn't belong to tenant
+            ForbiddenException: If user lacks write permissions
         """
+        if not context.can_write():
+            raise ForbiddenException("Insufficient permissions to update transactions")
+
         # Get existing transaction with ownership verification
-        transaction = self.transaction_repo.get_by_id_and_user(transaction_id, user.id)
+        transaction = self.transaction_repo.get_by_id_and_tenant(
+            transaction_id, context.tenant.id
+        )
         if not transaction:
             raise NotFoundException(f"Transaction {transaction_id} not found")
 
@@ -266,19 +294,25 @@ class TransactionService:
 
         return transaction
 
-    def delete_transaction(self, transaction_id: int, user: User) -> None:
+    def delete_transaction(self, transaction_id: int, context: TenantContext) -> None:
         """
         Delete transaction and update account balance.
 
         Args:
             transaction_id: Transaction ID
-            user: Current user
+            context: Tenant context
 
         Raises:
-            NotFoundException: If transaction doesn't exist or doesn't belong to user
+            NotFoundException: If transaction doesn't exist or doesn't belong to tenant
+            ForbiddenException: If user lacks write permissions
         """
+        if not context.can_write():
+            raise ForbiddenException("Insufficient permissions to delete transactions")
+
         # Get existing transaction with ownership verification
-        transaction = self.transaction_repo.get_by_id_and_user(transaction_id, user.id)
+        transaction = self.transaction_repo.get_by_id_and_tenant(
+            transaction_id, context.tenant.id
+        )
         if not transaction:
             raise NotFoundException(f"Transaction {transaction_id} not found")
 

@@ -5,6 +5,7 @@ from app.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
     from app.models.account import Account
+    from app.models.tenant_membership import TenantMembership
 
 
 class User(Base, TimestampMixin):
@@ -28,4 +29,10 @@ class User(Base, TimestampMixin):
         "Account",
         back_populates="user",
         cascade="all, delete-orphan",  # Delete accounts if user deleted
+        # NOTE: Will be removed in Phase 8 after migration complete
+    )
+    memberships: Mapped[list["TenantMembership"]] = relationship(
+        "TenantMembership",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )

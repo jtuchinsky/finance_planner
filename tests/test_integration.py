@@ -414,20 +414,20 @@ class TestFilteringAndPagination:
 class TestMultiTenantEndToEnd:
     """Integration tests for complete multi-tenant isolation"""
 
-    def test_complete_tenant_isolation(self, client, user_a_headers, user_b_headers):
-        """Verify complete isolation between users across all operations"""
+    def test_complete_tenant_isolation(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """Verify complete isolation between tenants across all operations"""
 
-        # User A: Create account and transactions
+        # User A (Tenant A): Create account and transactions
         account_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking", "initial_balance": 1000.00},
         ).json()
 
         for i in range(3):
             client.post(
                 "/api/transactions",
-                headers=user_a_headers,
+                headers=user_a_tenant_a_headers,
                 json={
                     "account_id": account_a["id"],
                     "amount": float(i * 10),
@@ -436,17 +436,17 @@ class TestMultiTenantEndToEnd:
                 },
             )
 
-        # User B: Create account and transactions
+        # User B (Tenant B): Create account and transactions
         account_b = client.post(
             "/api/accounts",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={"name": "User B Account", "account_type": "savings", "initial_balance": 2000.00},
         ).json()
 
         for i in range(2):
             client.post(
                 "/api/transactions",
-                headers=user_b_headers,
+                headers=user_b_tenant_b_headers,
                 json={
                     "account_id": account_b["id"],
                     "amount": float(i * 20),
@@ -455,38 +455,38 @@ class TestMultiTenantEndToEnd:
                 },
             )
 
-        # Test 1: User A sees only their account
-        accounts_a = client.get("/api/accounts", headers=user_a_headers).json()
+        # Test 1: User A sees only their tenant's account
+        accounts_a = client.get("/api/accounts", headers=user_a_tenant_a_headers).json()
         assert accounts_a["total"] == 1
         assert accounts_a["accounts"][0]["id"] == account_a["id"]
 
-        # Test 2: User B sees only their account
-        accounts_b = client.get("/api/accounts", headers=user_b_headers).json()
+        # Test 2: User B sees only their tenant's account
+        accounts_b = client.get("/api/accounts", headers=user_b_tenant_b_headers).json()
         assert accounts_b["total"] == 1
         assert accounts_b["accounts"][0]["id"] == account_b["id"]
 
-        # Test 3: User A sees only their transactions
-        transactions_a = client.get("/api/transactions", headers=user_a_headers).json()
+        # Test 3: User A sees only their tenant's transactions
+        transactions_a = client.get("/api/transactions", headers=user_a_tenant_a_headers).json()
         assert transactions_a["total"] == 3
         assert all(t["category"] == "user_a_category" for t in transactions_a["transactions"])
 
-        # Test 4: User B sees only their transactions
-        transactions_b = client.get("/api/transactions", headers=user_b_headers).json()
+        # Test 4: User B sees only their tenant's transactions
+        transactions_b = client.get("/api/transactions", headers=user_b_tenant_b_headers).json()
         assert transactions_b["total"] == 2
         assert all(t["category"] == "user_b_category" for t in transactions_b["transactions"])
 
-        # Test 5: User A cannot access User B's account
-        response = client.get(f"/api/accounts/{account_b['id']}", headers=user_a_headers)
+        # Test 5: User A (Tenant A) cannot access Tenant B's account
+        response = client.get(f"/api/accounts/{account_b['id']}", headers=user_a_tenant_a_headers)
         assert response.status_code == 404
 
-        # Test 6: User B cannot access User A's transactions
+        # Test 6: User B (Tenant B) cannot access Tenant A's transactions
         transaction_a_id = transactions_a["transactions"][0]["id"]
-        response = client.get(f"/api/transactions/{transaction_a_id}", headers=user_b_headers)
+        response = client.get(f"/api/transactions/{transaction_a_id}", headers=user_b_tenant_b_headers)
         assert response.status_code == 404
 
         # Test 7: Filtering returns no cross-tenant results
-        all_groceries = client.get("/api/transactions?category=user_a_category", headers=user_b_headers).json()
-        assert all_groceries["total"] == 0  # User B shouldn't see User A's categories
+        all_groceries = client.get("/api/transactions?category=user_a_category", headers=user_b_tenant_b_headers).json()
+        assert all_groceries["total"] == 0  # Tenant B shouldn't see Tenant A's categories
 
 
 class TestErrorHandlingEndToEnd:

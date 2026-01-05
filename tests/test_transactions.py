@@ -95,24 +95,24 @@ class TestTransactionCreation:
 
         assert response.status_code == 404
 
-    def test_create_transaction_other_user_account(self, client, user_a_headers, user_b_headers):
-        """Cannot create transaction for another user's account"""
-        # User A creates account
+    def test_create_transaction_other_user_account(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """Cannot create transaction for another tenant's account"""
+        # User A (Tenant A) creates account
         account_response = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         )
         account_id = account_response.json()["id"]
 
-        # User B tries to create transaction in User A's account
+        # User B (Tenant B) tries to create transaction in Tenant A's account
         transaction_data = {
             "account_id": account_id,
             "amount": 50.00,
             "date": str(date.today()),
             "category": "test",
         }
-        response = client.post("/api/transactions", headers=user_b_headers, json=transaction_data)
+        response = client.post("/api/transactions", headers=user_b_tenant_b_headers, json=transaction_data)
 
         assert response.status_code == 404
 
@@ -806,21 +806,21 @@ class TestBalanceCalculations:
 
 
 class TestMultiTenancy:
-    """Critical tests for multi-tenant data isolation"""
+    """Critical tests for cross-tenant data isolation"""
 
-    def test_users_see_only_own_transactions(self, client, user_a_headers, user_b_headers):
-        """Users should only see their own transactions"""
-        # User A creates account and transactions
+    def test_users_see_only_own_transactions(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """Users in different tenants should only see their own tenant's transactions"""
+        # User A (Tenant A) creates account and transactions
         account_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         ).json()
 
         for i in range(3):
             client.post(
                 "/api/transactions",
-                headers=user_a_headers,
+                headers=user_a_tenant_a_headers,
                 json={
                     "account_id": account_a["id"],
                     "amount": float(i * 10),
@@ -829,16 +829,16 @@ class TestMultiTenancy:
                 },
             )
 
-        # User B creates account and transaction
+        # User B (Tenant B) creates account and transaction
         account_b = client.post(
             "/api/accounts",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={"name": "User B Account", "account_type": "checking"},
         ).json()
 
         client.post(
             "/api/transactions",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={
                 "account_id": account_b["id"],
                 "amount": 100.00,
@@ -847,26 +847,26 @@ class TestMultiTenancy:
             },
         )
 
-        # User A should see 3 transactions
-        response_a = client.get("/api/transactions", headers=user_a_headers)
+        # User A should see 3 transactions (Tenant A only)
+        response_a = client.get("/api/transactions", headers=user_a_tenant_a_headers)
         assert response_a.json()["total"] == 3
 
-        # User B should see 1 transaction
-        response_b = client.get("/api/transactions", headers=user_b_headers)
+        # User B should see 1 transaction (Tenant B only)
+        response_b = client.get("/api/transactions", headers=user_b_tenant_b_headers)
         assert response_b.json()["total"] == 1
 
-    def test_user_cannot_access_other_user_transaction(self, client, user_a_headers, user_b_headers):
-        """User cannot access another user's transaction by ID"""
-        # User A creates transaction
+    def test_user_cannot_access_other_user_transaction(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot access Tenant A's transaction by ID"""
+        # User A (Tenant A) creates transaction
         account_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         ).json()
 
         transaction_a = client.post(
             "/api/transactions",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={
                 "account_id": account_a["id"],
                 "amount": 50.00,
@@ -875,24 +875,24 @@ class TestMultiTenancy:
             },
         ).json()
 
-        # User B tries to access User A's transaction
-        response_b = client.get(f"/api/transactions/{transaction_a['id']}", headers=user_b_headers)
+        # User B (Tenant B) tries to access Tenant A's transaction
+        response_b = client.get(f"/api/transactions/{transaction_a['id']}", headers=user_b_tenant_b_headers)
 
         # Must return 404 (not 403) to avoid revealing transaction existence
         assert response_b.status_code == 404
 
-    def test_user_cannot_update_other_user_transaction(self, client, user_a_headers, user_b_headers):
-        """User cannot update another user's transaction"""
-        # User A creates transaction
+    def test_user_cannot_update_other_user_transaction(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot update Tenant A's transaction"""
+        # User A (Tenant A) creates transaction
         account_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         ).json()
 
         transaction_a = client.post(
             "/api/transactions",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={
                 "account_id": account_a["id"],
                 "amount": 50.00,
@@ -901,10 +901,10 @@ class TestMultiTenancy:
             },
         ).json()
 
-        # User B tries to update User A's transaction
+        # User B (Tenant B) tries to update Tenant A's transaction
         response_b = client.patch(
             f"/api/transactions/{transaction_a['id']}",
-            headers=user_b_headers,
+            headers=user_b_tenant_b_headers,
             json={"amount": 1000.00},
         )
 
@@ -912,22 +912,22 @@ class TestMultiTenancy:
 
         # Verify transaction unchanged
         transaction_check = client.get(
-            f"/api/transactions/{transaction_a['id']}", headers=user_a_headers
+            f"/api/transactions/{transaction_a['id']}", headers=user_a_tenant_a_headers
         ).json()
         assert transaction_check["amount"] == 50.00
 
-    def test_user_cannot_delete_other_user_transaction(self, client, user_a_headers, user_b_headers):
-        """User cannot delete another user's transaction"""
-        # User A creates transaction
+    def test_user_cannot_delete_other_user_transaction(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """User in Tenant B cannot delete Tenant A's transaction"""
+        # User A (Tenant A) creates transaction
         account_a = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         ).json()
 
         transaction_a = client.post(
             "/api/transactions",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={
                 "account_id": account_a["id"],
                 "amount": 50.00,
@@ -936,16 +936,16 @@ class TestMultiTenancy:
             },
         ).json()
 
-        # User B tries to delete User A's transaction
+        # User B (Tenant B) tries to delete Tenant A's transaction
         response_b = client.delete(
-            f"/api/transactions/{transaction_a['id']}", headers=user_b_headers
+            f"/api/transactions/{transaction_a['id']}", headers=user_b_tenant_b_headers
         )
 
         assert response_b.status_code == 404
 
         # Verify transaction still exists for User A
         transaction_check = client.get(
-            f"/api/transactions/{transaction_a['id']}", headers=user_a_headers
+            f"/api/transactions/{transaction_a['id']}", headers=user_a_tenant_a_headers
         )
         assert transaction_check.status_code == 200
 
@@ -1067,11 +1067,11 @@ class TestBatchTransactionCreation:
         response = client.post("/api/transactions/batch", headers=auth_headers, json=batch_data)
         assert response.status_code == 404
 
-    def test_create_batch_other_user_account(self, client, user_a_headers, user_b_headers):
-        """Cannot create batch for another user's account"""
+    def test_create_batch_other_user_account(self, client, user_a_tenant_a_headers, user_b_tenant_b_headers):
+        """Cannot create batch for another tenant's account"""
         account_response = client.post(
             "/api/accounts",
-            headers=user_a_headers,
+            headers=user_a_tenant_a_headers,
             json={"name": "User A Account", "account_type": "checking"},
         )
         account_id = account_response.json()["id"]
@@ -1081,7 +1081,7 @@ class TestBatchTransactionCreation:
             "transactions": [{"amount": 50.00, "date": str(date.today()), "category": "test"}],
         }
 
-        response = client.post("/api/transactions/batch", headers=user_b_headers, json=batch_data)
+        response = client.post("/api/transactions/batch", headers=user_b_tenant_b_headers, json=batch_data)
         assert response.status_code == 404  # Security: act like doesn't exist
 
 

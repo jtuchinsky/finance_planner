@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, status, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_current_user
-from app.models.user import User
+from app.dependencies import get_tenant_context
+from app.models.tenant_context import TenantContext
 from app.services.transaction_service import TransactionService
 from app.schemas.transaction_schemas import (
     TransactionCreate,
@@ -22,25 +22,26 @@ router = APIRouter()
 @router.post("/", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
 def create_transaction(
     transaction_data: TransactionCreate,
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Create a new transaction.
 
     - Updates account balance automatically
-    - Requires valid account_id owned by user
+    - Requires valid account_id owned by tenant
     - Amount: positive for income/deposits, negative for expenses/withdrawals
+    - Requires MEMBER or higher permissions
     """
     service = TransactionService(db)
-    return service.create_transaction(transaction_data, current_user)
+    return service.create_transaction(transaction_data, context)
 
 
 @router.post("/batch", response_model=TransactionBatchResponse, status_code=status.HTTP_201_CREATED)
 def create_transaction_batch(
     batch_data: TransactionBatchCreate,
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Create multiple transactions atomically for a single account.
@@ -49,9 +50,10 @@ def create_transaction_batch(
     - Minimum 1, maximum 100 transactions per batch
     - Updates account balance exactly once
     - All transactions share the same account_id
+    - Requires MEMBER or higher permissions
     """
     service = TransactionService(db)
-    transactions, balance = service.create_transaction_batch(batch_data, current_user)
+    transactions, balance = service.create_transaction_batch(batch_data, context)
 
     total_amount = sum(txn.amount for txn in transactions)
 
@@ -77,13 +79,13 @@ def list_transactions(
     der_merchant: Optional[str] = Query(None, description="Filter by derived merchant (partial match)"),
     limit: int = Query(100, ge=1, le=1000, description="Max results"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     List transactions with optional filters.
 
-    - Returns only transactions from accounts owned by the user
+    - Returns only transactions from accounts owned by the tenant
     - Supports filtering by account, date range, category, merchant, tags
     - Results sorted by date (newest first)
     """
@@ -93,7 +95,7 @@ def list_transactions(
     tags_list = [tag.strip() for tag in tags.split(",")] if tags else None
 
     transactions, total = service.get_transactions(
-        user=current_user,
+        context=context,
         account_id=account_id,
         start_date=start_date,
         end_date=end_date,
@@ -112,47 +114,49 @@ def list_transactions(
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(
     transaction_id: int,
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Get a specific transaction by ID.
 
-    - Returns 404 if transaction doesn't exist or doesn't belong to user
+    - Returns 404 if transaction doesn't exist or doesn't belong to tenant
     """
     service = TransactionService(db)
-    return service.get_transaction(transaction_id, current_user)
+    return service.get_transaction(transaction_id, context)
 
 
 @router.patch("/{transaction_id}", response_model=TransactionResponse)
 def update_transaction(
     transaction_id: int,
     transaction_data: TransactionUpdate,
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Update a transaction.
 
     - Automatically recalculates account balance if amount changed
-    - Returns 404 if transaction doesn't exist or doesn't belong to user
+    - Returns 404 if transaction doesn't exist or doesn't belong to tenant
     - Only provided fields are updated (partial update)
+    - Requires MEMBER or higher permissions
     """
     service = TransactionService(db)
-    return service.update_transaction(transaction_id, transaction_data, current_user)
+    return service.update_transaction(transaction_id, transaction_data, context)
 
 
 @router.delete("/{transaction_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transaction(
     transaction_id: int,
+    context: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Delete a transaction.
 
     - Automatically updates account balance
-    - Returns 404 if transaction doesn't exist or doesn't belong to user
+    - Returns 404 if transaction doesn't exist or doesn't belong to tenant
+    - Requires MEMBER or higher permissions
     """
     service = TransactionService(db)
-    service.delete_transaction(transaction_id, current_user)
+    service.delete_transaction(transaction_id, context)

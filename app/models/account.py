@@ -7,6 +7,7 @@ from app.models.base import Base, TimestampMixin
 if TYPE_CHECKING:
     from app.models.user import User
     from app.models.transaction import Transaction
+    from app.models.tenant import Tenant
 
 
 class AccountType(str, PyEnum):
@@ -30,11 +31,17 @@ class Account(Base, TimestampMixin):
     __tablename__ = "accounts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     user_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True,  # Critical for multi-tenant queries
+        index=True,  # NOTE: Will be removed in Phase 8 after migration complete
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     account_type: Mapped[AccountType] = mapped_column(
@@ -46,7 +53,12 @@ class Account(Base, TimestampMixin):
     # Balance updated via transaction service (not directly modified)
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="accounts")
+    tenant: Mapped["Tenant"] = relationship("Tenant", back_populates="accounts")
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="accounts",
+        # NOTE: Will be removed in Phase 8 after migration complete
+    )
     transactions: Mapped[list["Transaction"]] = relationship(
         "Transaction",
         back_populates="account",

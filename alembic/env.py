@@ -12,6 +12,9 @@ from app.models.base import Base
 from app.models.user import User
 from app.models.account import Account
 from app.models.transaction import Transaction
+from app.models.tenant import Tenant
+from app.models.tenant_membership import TenantMembership
+from app.models.role import TenantRole
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

@@ -39,13 +39,35 @@ class TransactionRepository:
         """Get transaction by ID"""
         return self.db.query(Transaction).filter(Transaction.id == transaction_id).first()
 
+    def get_by_id_and_tenant(
+        self, transaction_id: int, tenant_id: int
+    ) -> Optional[Transaction]:
+        """
+        Get transaction by ID, ensuring it belongs to the tenant.
+        Joins with Account to verify tenant ownership.
+
+        Args:
+            transaction_id: Transaction ID
+            tenant_id: Tenant ID
+
+        Returns:
+            Transaction object or None if not found or belongs to different tenant
+        """
+        return (
+            self.db.query(Transaction)
+            .join(Account)
+            .filter(
+                Transaction.id == transaction_id,
+                Account.tenant_id == tenant_id,
+            )
+            .first()
+        )
+
+    # DEPRECATED - Will be removed in Phase 8
     def get_by_id_and_user(
         self, transaction_id: int, user_id: int
     ) -> Optional[Transaction]:
-        """
-        Get transaction by ID, ensuring it belongs to the user.
-        Joins with Account to verify ownership.
-        """
+        """DEPRECATED: Use get_by_id_and_tenant instead"""
         return (
             self.db.query(Transaction)
             .join(Account)
@@ -69,7 +91,7 @@ class TransactionRepository:
 
     def get_with_filters(
         self,
-        user_id: int,
+        tenant_id: int,
         account_id: Optional[int] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -83,10 +105,25 @@ class TransactionRepository:
     ) -> tuple[list[Transaction], int]:
         """
         Get transactions with filters, ensuring multi-tenant isolation.
-        Returns (transactions, total_count).
+
+        Args:
+            tenant_id: Tenant ID for isolation
+            account_id: Optional account filter
+            start_date: Optional start date filter
+            end_date: Optional end date filter
+            category: Optional category filter
+            merchant: Optional merchant filter (case-insensitive partial match)
+            tags: Optional list of tags to filter by (ANY match)
+            der_category: Optional derived category filter
+            der_merchant: Optional derived merchant filter (case-insensitive partial match)
+            limit: Maximum number of results
+            offset: Pagination offset
+
+        Returns:
+            Tuple of (transactions list, total count)
         """
-        # Base query with user isolation via account join
-        query = self.db.query(Transaction).join(Account).filter(Account.user_id == user_id)
+        # Base query with tenant isolation via account join
+        query = self.db.query(Transaction).join(Account).filter(Account.tenant_id == tenant_id)
 
         # Apply filters
         if account_id is not None:

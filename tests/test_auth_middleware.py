@@ -95,29 +95,76 @@ def test_bearer_prefix_required(client):
 def test_user_auto_created_on_first_request(client, db_session):
     """User record should be auto-created on first API request"""
     from app.models.user import User
+    from app.models.tenant import Tenant
+    from app.models.tenant_membership import TenantMembership
+    from app.models.role import TenantRole
 
     # Verify no users exist
     assert db_session.query(User).count() == 0
 
-    # Make first request
-    token = create_test_token(user_id="new-user-123")
+    # Create a tenant first (required for multi-tenant system)
+    tenant = Tenant(name="Test Tenant")
+    db_session.add(tenant)
+    db_session.commit()
+    db_session.refresh(tenant)
+
+    # Make first request with tenant_id in token
+    token = create_test_token(user_id="new-user-123", tenant_id=tenant.id)
     headers = {"Authorization": f"Bearer {token}"}
     response = client.get("/api/accounts", headers=headers)
 
-    assert response.status_code == 200
+    # Will fail with 403 because user doesn't have membership yet
+    assert response.status_code == 403
 
-    # Verify user was created
-    users = db_session.query(User).all()
-    assert len(users) == 1
-    assert users[0].auth_user_id == "new-user-123"
+    # Verify user was auto-created even though membership check failed
+    user = db_session.query(User).filter_by(auth_user_id="new-user-123").first()
+    assert user is not None
+
+    # Now create membership manually and try again
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        role=TenantRole.MEMBER
+    )
+    db_session.add(membership)
+    db_session.commit()
+
+    # Now request should succeed
+    response = client.get("/api/accounts", headers=headers)
+    assert response.status_code == 200
 
 
 def test_same_user_not_duplicated(client, db_session):
     """Multiple requests from same user should not create duplicates"""
     from app.models.user import User
+    from app.models.tenant import Tenant
+    from app.models.tenant_membership import TenantMembership
+    from app.models.role import TenantRole
 
-    token = create_test_token(user_id="same-user")
+    # Create tenant and user with membership
+    tenant = Tenant(name="Test Tenant")
+    db_session.add(tenant)
+    db_session.commit()
+    db_session.refresh(tenant)
+
+    token = create_test_token(user_id="same-user", tenant_id=tenant.id)
     headers = {"Authorization": f"Bearer {token}"}
+
+    # First request will auto-create user but fail on membership check
+    client.get("/api/accounts", headers=headers)
+
+    # Verify user was created
+    user = db_session.query(User).filter_by(auth_user_id="same-user").first()
+    assert user is not None
+
+    # Create membership
+    membership = TenantMembership(
+        tenant_id=tenant.id,
+        user_id=user.id,
+        role=TenantRole.MEMBER
+    )
+    db_session.add(membership)
+    db_session.commit()
 
     # Make multiple requests
     client.get("/api/accounts", headers=headers)
