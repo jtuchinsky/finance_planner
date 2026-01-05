@@ -4,17 +4,19 @@ Complete database schema documentation for the Finance Planner multi-tenant pers
 
 ## Overview
 
-The Finance Planner uses a relational database with three core tables designed for multi-tenant operation. All data is isolated by user, with automatic cascade deletes to maintain referential integrity.
+The Finance Planner uses a relational database with five core tables designed for multi-tenant operation with role-based access control. All data is isolated by tenant (family/household), with automatic cascade deletes to maintain referential integrity.
 
 **Technology Stack:**
 - **Database**: PostgreSQL (production) or SQLite (development/testing)
 - **ORM**: SQLAlchemy 2.0 with declarative mapping
 - **Migrations**: Alembic
-- **Multi-Tenancy**: User-scoped data with strict isolation
+- **Multi-Tenancy**: Tenant-scoped data with strict isolation between tenant groups
+- **Authorization**: Role-based access control (OWNER, ADMIN, MEMBER, VIEWER)
 
 **Key Features:**
 - Auto-timestamping on all records (created_at, updated_at)
-- Cascade delete relationships (User → Accounts → Transactions)
+- Cascade delete relationships (Tenant → Memberships/Accounts → Transactions)
+- Role-based permissions with hierarchical access levels
 - Financial precision with Numeric(15,2) for monetary values
 - Optimized indexes for common query patterns
 - Flexible tagging system using JSON
@@ -27,65 +29,92 @@ The Finance Planner uses a relational database with three core tables designed f
 
 ```
 ┌─────────────────────────┐
-│        users            │
+│        tenants          │
 ├─────────────────────────┤
 │ PK │ id                 │
-│ UK │ auth_user_id       │◄────── JWT 'sub' claim from MCP_Auth
+│    │ name               │◄────── Family/Household name
 │    │ created_at         │
 │    │ updated_at         │
-└──────────┬──────────────┘
-           │ 1
-           │
-           │ has many
-           │
-           │ N
-┌──────────▼──────────────┐
-│       accounts          │
-├─────────────────────────┤
-│ PK │ id                 │
-│ FK │ user_id            │───────► users.id (CASCADE)
-│ IDX│ user_id            │◄────── Multi-tenant queries
-│    │ name               │
-│    │ account_type       │◄────── ENUM (checking, savings, etc.)
-│    │ balance            │◄────── Numeric(15,2)
-│    │ created_at         │
-│    │ updated_at         │
-└──────────┬──────────────┘
-           │ 1
-           │
-           │ has many
-           │
-           │ N
-┌──────────▼──────────────┐
-│     transactions        │
-├─────────────────────────┤
-│ PK │ id                 │
-│ FK │ account_id         │───────► accounts.id (CASCADE)
-│ IDX│ date               │
-│ IDX│ category           │
-│    │ amount             │◄────── Numeric(15,2) (+income/-expense)
-│    │ description        │
-│    │ merchant           │
-│    │ location           │
-│    │ tags               │◄────── JSON array
-│ IDX│ der_category       │◄────── Derived/calculated category
-│    │ der_merchant       │◄────── Derived/calculated merchant
-│    │ created_at         │
-│    │ updated_at         │
-└─────────────────────────┘
+└──┬────────────┬─────────┘
+   │ 1          │ 1
+   │            │
+   │            │ has many
+   │            │
+   │ N          │ N
+┌──▼─────────────────────┐      ┌──▼──────────────────────┐
+│  tenant_memberships    │      │       accounts          │
+├────────────────────────┤      ├─────────────────────────┤
+│ PK │ id                │      │ PK │ id                 │
+│ FK │ tenant_id         │──┐   │ FK │ tenant_id          │───► tenants.id (CASCADE)
+│ FK │ user_id           │─►│   │ FK │ user_id            │───► users.id (legacy)
+│ IDX│ (tenant_id, user_id)│ │  │ IDX│ tenant_id          │◄─── Multi-tenant queries
+│    │ role              │  │   │    │ name               │
+│    │ created_at        │  │   │    │ account_type       │◄─── ENUM (checking, savings, etc.)
+│    │ updated_at        │  │   │    │ balance            │◄─── Numeric(15,2)
+└────────┬───────────────┘  │   │    │ created_at         │
+         │                  │   │    │ updated_at         │
+         │ N                │   └──────────┬──────────────┘
+         │                  │              │ 1
+         │                  │              │
+         │                  │              │ has many
+┌────────▼──────────────┐  │              │
+│        users          │  │              │ N
+├───────────────────────┤  │   ┌──────────▼──────────────┐
+│ PK │ id               │◄─┘   │     transactions        │
+│ UK │ auth_user_id     │◄──── JWT 'sub' claim from MCP_Auth
+│    │ created_at       │      ├─────────────────────────┤
+│    │ updated_at       │      │ PK │ id                 │
+└───────────────────────┘      │ FK │ account_id         │───────► accounts.id (CASCADE)
+                               │ IDX│ date               │
+                               │ IDX│ category           │
+                               │    │ amount             │◄────── Numeric(15,2) (+income/-expense)
+                               │    │ description        │
+                               │    │ merchant           │
+                               │    │ location           │
+                               │    │ tags               │◄────── JSON array
+                               │ IDX│ der_category       │◄────── Derived/calculated category
+                               │    │ der_merchant       │◄────── Derived/calculated merchant
+                               │    │ created_at         │
+                               │    │ updated_at         │
+                               └─────────────────────────┘
 
 Composite Indexes:
-  • (account_id, date)         - Date range queries per account
-  • (account_id, category)     - Category filtering per account
-  • (account_id, der_category) - Derived category filtering per account
+  • tenant_memberships (tenant_id, user_id) - Unique membership lookup
+  • transactions (account_id, date)         - Date range queries per account
+  • transactions (account_id, category)     - Category filtering per account
+  • transactions (account_id, der_category) - Derived category filtering per account
+
+Multi-Tenant Isolation:
+  • Tenant = Isolation boundary (not User)
+  • All accounts belong to a tenant (shared within family/household)
+  • Users access data through TenantMembership with role-based permissions
+  • JWT contains tenant_id claim for authorization
 ```
 
 ### Mermaid Diagram
 
 ```mermaid
 erDiagram
-    users ||--o{ accounts : "owns"
+    tenants ||--o{ tenant_memberships : "has members"
+    tenants ||--o{ accounts : "owns"
+    users ||--o{ tenant_memberships : "belongs to"
     accounts ||--o{ transactions : "contains"
+
+    tenants {
+        int id PK "Auto-increment"
+        string name "Family/Household name"
+        datetime created_at
+        datetime updated_at
+    }
+
+    tenant_memberships {
+        int id PK "Auto-increment"
+        int tenant_id FK "→ tenants.id CASCADE"
+        int user_id FK "→ users.id CASCADE"
+        enum role "OWNER|ADMIN|MEMBER|VIEWER"
+        datetime created_at
+        datetime updated_at
+    }
 
     users {
         int id PK "Auto-increment"
@@ -96,7 +125,8 @@ erDiagram
 
     accounts {
         int id PK "Auto-increment"
-        int user_id FK "→ users.id CASCADE"
+        int tenant_id FK "→ tenants.id CASCADE"
+        int user_id FK "→ users.id (legacy)"
         string name
         enum account_type "checking|savings|credit_card|investment|loan|other"
         numeric balance "Numeric(15,2)"
@@ -125,6 +155,93 @@ erDiagram
 
 ## Table Specifications
 
+### `tenants` Table
+
+**Purpose:** Represents isolation boundaries for multi-tenant architecture. Each tenant is a family/household with shared financial data.
+
+**File:** `app/models/tenant.py`
+
+#### Columns
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Tenant ID |
+| `name` | String(255) | NOT NULL | Tenant name (e.g., "Smith Family", "Acme Corporation") |
+| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
+| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+
+#### Relationships
+
+| Relationship | Type | Target | Cascade | Back-Populates |
+|--------------|------|--------|---------|----------------|
+| `memberships` | One-to-Many | `tenant_memberships` table | `all, delete-orphan` | `tenant_membership.tenant` |
+| `accounts` | One-to-Many | `accounts` table | `all, delete-orphan` | `account.tenant` |
+
+**Cascade Behavior:** When a tenant is deleted, all associated memberships and accounts (and their transactions) are automatically deleted.
+
+#### Indexes
+
+- **PRIMARY KEY** on `id`
+
+#### Notes
+
+- Tenant is the isolation boundary for all financial data
+- All members of a tenant share the same accounts and transactions
+- Complete data isolation between different tenants
+- Tenants are created during user registration in MCP_Auth
+
+---
+
+### `tenant_memberships` Table
+
+**Purpose:** Links users to tenants with role-based permissions. Controls who can access tenant data and what they can do.
+
+**File:** `app/models/tenant_membership.py`
+
+#### Columns
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Membership ID |
+| `tenant_id` | Integer | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant this membership belongs to (CASCADE on delete) |
+| `user_id` | Integer | FOREIGN KEY (users.id), NOT NULL, INDEXED | User who is a member (CASCADE on delete) |
+| `role` | Enum(TenantRole) | NOT NULL, DEFAULT 'member' | Permission level (OWNER, ADMIN, MEMBER, VIEWER) |
+| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
+| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+
+#### Relationships
+
+| Relationship | Type | Target | Cascade | Back-Populates |
+|--------------|------|--------|---------|----------------|
+| `tenant` | Many-to-One | `tenants` table | N/A (child) | `tenant.memberships` |
+| `user` | Many-to-One | `users` table | N/A (child) | `user.memberships` |
+
+**Cascade Behavior:**
+- When a tenant is deleted → all memberships deleted (via `tenant.memberships` cascade)
+- When a user is deleted → all memberships deleted (via `user.memberships` cascade)
+
+#### Indexes
+
+- **PRIMARY KEY** on `id`
+- **UNIQUE INDEX** on `(tenant_id, user_id)` - Prevents duplicate memberships
+- **INDEX** on `tenant_id` (for listing tenant members)
+- **INDEX** on `user_id` (for finding user's tenants)
+
+#### Foreign Keys
+
+- `tenant_id` → `tenants.id` with `ON DELETE CASCADE`
+- `user_id` → `users.id` with `ON DELETE CASCADE`
+
+#### Notes
+
+- Each user can belong to multiple tenants (e.g., family and business)
+- Each tenant can have multiple members
+- Role hierarchy: OWNER > ADMIN > MEMBER > VIEWER
+- OWNER role cannot be changed or removed
+- Unique constraint prevents duplicate memberships
+
+---
+
 ### `users` Table
 
 **Purpose:** Tracks users authenticated via MCP_Auth JWT tokens. No authentication credentials stored.
@@ -144,9 +261,12 @@ erDiagram
 
 | Relationship | Type | Target | Cascade | Back-Populates |
 |--------------|------|--------|---------|----------------|
+| `memberships` | One-to-Many | `tenant_memberships` table | `all, delete-orphan` | `tenant_membership.user` |
 | `accounts` | One-to-Many | `accounts` table | `all, delete-orphan` | `account.user` |
 
-**Cascade Behavior:** When a user is deleted, all associated accounts (and their transactions) are automatically deleted.
+**Cascade Behavior:**
+- When a user is deleted, all associated memberships are automatically deleted
+- When a user is deleted, all associated accounts (and their transactions) are automatically deleted (legacy behavior)
 
 #### Indexes
 
@@ -158,12 +278,14 @@ erDiagram
 - Users are auto-created on first API request with valid JWT
 - No password or email stored (delegated to MCP_Auth)
 - `auth_user_id` matches the JWT 'sub' claim from MCP_Auth
+- Users access data through TenantMembership with role-based permissions
+- A user can belong to multiple tenants (e.g., family and business accounts)
 
 ---
 
 ### `accounts` Table
 
-**Purpose:** Financial accounts owned by users (checking, savings, credit cards, investments, etc.)
+**Purpose:** Financial accounts owned by tenants (checking, savings, credit cards, investments, etc.). Shared by all members of a tenant.
 
 **File:** `app/models/account.py`
 
@@ -172,7 +294,8 @@ erDiagram
 | Column | Type | Constraints | Description |
 |--------|------|-------------|-------------|
 | `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Account ID |
-| `user_id` | Integer | FOREIGN KEY (users.id), NOT NULL, INDEXED | Owner's user ID (CASCADE on delete) |
+| `tenant_id` | Integer | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant who owns this account (CASCADE on delete) |
+| `user_id` | Integer | FOREIGN KEY (users.id), NOT NULL, INDEXED | User who created the account (legacy, for audit trail) |
 | `name` | String(255) | NOT NULL | Account name (e.g., "Chase Checking") |
 | `account_type` | Enum | NOT NULL | Type of account (see AccountType enum) |
 | `balance` | Numeric(15,2) | NOT NULL, DEFAULT 0.00 | Current balance (auto-calculated from transactions) |
@@ -183,27 +306,33 @@ erDiagram
 
 | Relationship | Type | Target | Cascade | Back-Populates |
 |--------------|------|--------|---------|----------------|
+| `tenant` | Many-to-One | `tenants` table | N/A (child) | `tenant.accounts` |
 | `user` | Many-to-One | `users` table | N/A (child) | `user.accounts` |
 | `transactions` | One-to-Many | `transactions` table | `all, delete-orphan` | `transaction.account` |
 
 **Cascade Behavior:**
-- When a user is deleted → all accounts deleted (via `users.accounts` cascade)
+- When a tenant is deleted → all accounts deleted (via `tenant.accounts` cascade)
+- When a user is deleted → all accounts deleted (via `users.accounts` cascade - legacy)
 - When an account is deleted → all associated transactions deleted
 
 #### Indexes
 
 - **PRIMARY KEY** on `id`
-- **INDEX** on `user_id` (critical for multi-tenant queries)
+- **INDEX** on `tenant_id` (critical for multi-tenant queries)
+- **INDEX** on `user_id` (for audit trail queries)
 
 #### Foreign Keys
 
+- `tenant_id` → `tenants.id` with `ON DELETE CASCADE`
 - `user_id` → `users.id` with `ON DELETE CASCADE`
 
 #### Notes
 
 - Balance is maintained by the transaction service (not directly modified via API)
-- All queries must filter by `user_id` for multi-tenant security
+- All queries must filter by `tenant_id` for multi-tenant security
+- All members of a tenant can view and manage all tenant accounts
 - Balance precision: Up to 9,999,999,999,999.99 (13 digits + 2 decimals)
+- `user_id` is kept for audit trail (who created the account) but is not used for access control
 
 ---
 
@@ -268,6 +397,59 @@ erDiagram
 ---
 
 ## Enums and Custom Types
+
+### `TenantRole` Enum
+
+**File:** `app/models/role.py`
+
+**Implementation:** Python Enum with SQLAlchemy Enum type (`native_enum=False` for portability)
+
+**Values:**
+
+| Value | Description | Permission Level |
+|-------|-------------|------------------|
+| `owner` | Full control over tenant - manage members, change roles, update tenant settings, all data operations | Highest (4) |
+| `admin` | Invite/remove members, all data operations | High (3) |
+| `member` | Create, edit, and delete accounts & transactions | Medium (2) |
+| `viewer` | Read-only access to all data | Low (1) |
+
+**Role Hierarchy:**
+```
+OWNER (4) > ADMIN (3) > MEMBER (2) > VIEWER (1)
+```
+
+**Permission Matrix:**
+
+| Action | OWNER | ADMIN | MEMBER | VIEWER |
+|--------|-------|-------|--------|--------|
+| View accounts & transactions | ✅ | ✅ | ✅ | ✅ |
+| Create accounts | ✅ | ✅ | ✅ | ❌ |
+| Edit/delete accounts | ✅ | ✅ | ✅ | ❌ |
+| Create transactions | ✅ | ✅ | ✅ | ❌ |
+| Edit/delete transactions | ✅ | ✅ | ✅ | ❌ |
+| Invite members | ✅ | ✅ | ❌ | ❌ |
+| Remove members | ✅ | ✅ | ❌ | ❌ |
+| Change member roles | ✅ | ❌ | ❌ | ❌ |
+| Update tenant name | ✅ | ❌ | ❌ | ❌ |
+
+**Usage Example:**
+```python
+from app.models.role import TenantRole
+
+membership.role = TenantRole.MEMBER
+if context.has_permission(TenantRole.MEMBER):
+    # User can create accounts
+    pass
+```
+
+**Database Storage:** Stored as string values (not native database enum) for portability across PostgreSQL and SQLite.
+
+**Notes:**
+- OWNER role cannot be changed or removed
+- Role hierarchy enforced in TenantContext.has_permission() method
+- Default role for new members is MEMBER
+
+---
 
 ### `AccountType` Enum
 
@@ -334,22 +516,44 @@ transaction.tags = ["groceries", "food", "essentials"]
 ### Relationship Hierarchy
 
 ```
-User (1) ──────► Accounts (Many) ──────► Transactions (Many)
+Tenant (1) ──┬──► TenantMemberships (Many) ──► Users (Many)
+             │
+             └──► Accounts (Many) ──────► Transactions (Many)
 ```
 
+**Multi-Tenant Isolation:**
+- Tenant is the top-level isolation boundary
+- Users access tenant data through TenantMembership with roles
+- All accounts belong to a tenant (shared within family/household)
+- Transactions inherit tenant scope through accounts
+
 ### Cascade Delete Behavior
+
+#### Tenant Deletion
+
+```
+DELETE tenant
+  ├─► CASCADE DELETE all memberships
+  └─► CASCADE DELETE all accounts
+      └─► CASCADE DELETE all transactions
+```
+
+**Implementation:**
+- `Tenant.memberships` relationship with `cascade="all, delete-orphan"`
+- `Tenant.accounts` relationship with `cascade="all, delete-orphan"`
+
+**Effect:** Deleting a tenant removes all memberships, accounts, and transactions. Users remain (they may belong to other tenants).
 
 #### User Deletion
 
 ```
 DELETE user
-  └─► CASCADE DELETE all accounts
-      └─► CASCADE DELETE all transactions
+  └─► CASCADE DELETE all memberships
 ```
 
-**Implementation:** `User.accounts` relationship with `cascade="all, delete-orphan"`
+**Implementation:** `User.memberships` relationship with `cascade="all, delete-orphan"`
 
-**Effect:** Deleting a user removes all their accounts and all transactions in those accounts.
+**Effect:** Deleting a user removes all their tenant memberships. Accounts and transactions remain (they belong to tenants, not users).
 
 #### Account Deletion
 
@@ -364,9 +568,21 @@ DELETE account
 
 ### Back-Population
 
+**Tenant ↔ TenantMembership:**
+- `tenant.memberships` → List of TenantMembership objects
+- `tenant_membership.tenant` → Single Tenant object
+
+**User ↔ TenantMembership:**
+- `user.memberships` → List of TenantMembership objects
+- `tenant_membership.user` → Single User object
+
+**Tenant ↔ Account:**
+- `tenant.accounts` → List of Account objects
+- `account.tenant` → Single Tenant object
+
 **User ↔ Account:**
-- `user.accounts` → List of Account objects
-- `account.user` → Single User object
+- `user.accounts` → List of Account objects (legacy, for audit trail)
+- `account.user` → Single User object (who created the account)
 
 **Account ↔ Transaction:**
 - `account.transactions` → List of Transaction objects
@@ -376,6 +592,7 @@ DELETE account
 - Bidirectional navigation
 - Automatic relationship management by SQLAlchemy
 - Cascade deletes maintain referential integrity
+- Multi-tenant isolation enforced at database level
 
 ---
 
@@ -389,10 +606,16 @@ Indexes dramatically improve query performance for common operations in the Fina
 
 | Table | Column(s) | Type | Purpose |
 |-------|-----------|------|---------|
+| `tenants` | `id` | PRIMARY KEY | Unique tenant identification |
+| `tenant_memberships` | `id` | PRIMARY KEY | Unique membership identification |
+| `tenant_memberships` | `(tenant_id, user_id)` | UNIQUE INDEX | Prevent duplicate memberships, fast lookups |
+| `tenant_memberships` | `tenant_id` | INDEX | List all members of a tenant |
+| `tenant_memberships` | `user_id` | INDEX | Find all tenants for a user |
 | `users` | `id` | PRIMARY KEY | Unique user identification |
 | `users` | `auth_user_id` | UNIQUE INDEX | Fast JWT user lookups, prevent duplicates |
 | `accounts` | `id` | PRIMARY KEY | Unique account identification |
-| `accounts` | `user_id` | INDEX | Multi-tenant queries (critical!) |
+| `accounts` | `tenant_id` | INDEX | Multi-tenant queries (critical!) |
+| `accounts` | `user_id` | INDEX | Audit trail queries |
 | `transactions` | `id` | PRIMARY KEY | Unique transaction identification |
 | `transactions` | `account_id` | INDEX | FK constraint + transaction filtering |
 | `transactions` | `date` | INDEX | Date range queries |
@@ -427,16 +650,16 @@ WHERE account_id = ? AND category = ?;
 
 ### Multi-Tenant Index Strategy
 
-The `user_id` index on the `accounts` table is **critical** for multi-tenant performance:
+The `tenant_id` index on the `accounts` table is **critical** for multi-tenant performance:
 
 ```sql
 -- Fast query (uses index):
-SELECT * FROM accounts WHERE user_id = 123;
+SELECT * FROM accounts WHERE tenant_id = 5;
 
--- Without index, this would be a full table scan across all users!
+-- Without index, this would be a full table scan across all tenants!
 ```
 
-Every account query is scoped by `user_id` to enforce tenant isolation.
+Every account query is scoped by `tenant_id` to enforce tenant isolation. The unique composite index on `tenant_memberships (tenant_id, user_id)` ensures fast authorization checks when verifying user permissions.
 
 ---
 
@@ -444,14 +667,19 @@ Every account query is scoped by `user_id` to enforce tenant isolation.
 
 ### 1. Multi-Tenant Isolation
 
-**Decision:** Enforce user isolation at the repository layer using `user_id` filters on every query.
+**Decision:** Enforce tenant isolation at the repository layer using `tenant_id` filters on every query. Users access data through TenantMembership with role-based permissions.
 
 **Rationale:**
-- Prevents data leaks between users
-- Returns 404 (not 403) when accessing other users' data to avoid revealing existence
-- Index on `user_id` ensures performant filtering
+- Prevents data leaks between tenant groups (families/households)
+- Enables collaboration within tenant (all members share accounts)
+- Returns 404 (not 403) when accessing other tenants' data to avoid revealing existence
+- Index on `tenant_id` ensures performant filtering
+- TenantMembership provides fine-grained access control with roles
 
-**Implementation:** All repository methods filter by `user_id` extracted from JWT token.
+**Implementation:**
+- All repository methods filter by `tenant_id` extracted from JWT token
+- TenantContext verifies user membership and role before operations
+- Permission checks at service layer based on role hierarchy
 
 ---
 
@@ -606,9 +834,13 @@ alembic history
 
 | Table | Model File |
 |-------|------------|
+| `tenants` | `app/models/tenant.py` |
+| `tenant_memberships` | `app/models/tenant_membership.py` |
 | `users` | `app/models/user.py` |
 | `accounts` | `app/models/account.py` |
 | `transactions` | `app/models/transaction.py` |
+| Enums | `app/models/role.py`, `app/models/account.py` |
+| Context | `app/models/tenant_context.py` |
 | Base classes | `app/models/base.py` |
 
 ### Schema Verification
@@ -642,15 +874,26 @@ After running migrations, verify the schema matches this documentation:
 
 The Finance Planner database schema is designed for:
 
-✅ **Multi-tenant security** - Strict user isolation
+✅ **Multi-tenant security** - Strict tenant isolation with role-based access control
+✅ **Collaboration** - Family/household members share accounts within tenant
 ✅ **Data integrity** - Cascade deletes and foreign keys
 ✅ **Performance** - Strategic indexes for common queries
 ✅ **Accuracy** - Numeric precision for financial data
 ✅ **Auditability** - Timestamps on all records
 ✅ **Flexibility** - JSON tags and comprehensive account types
+✅ **Authorization** - Four-tier role hierarchy (OWNER > ADMIN > MEMBER > VIEWER)
 ✅ **Maintainability** - Clear relationships and well-documented design
 
-**Total Tables:** 3 (users, accounts, transactions)
-**Total Indexes:** 12 (including composite indexes)
-**Relationships:** 2 (User→Accounts, Accounts→Transactions)
-**Technology:** SQLAlchemy 2.0 + Alembic + PostgreSQL/SQLite
+**Architecture:**
+- **Total Tables:** 5 (tenants, tenant_memberships, users, accounts, transactions)
+- **Total Indexes:** 18 (including composite indexes)
+- **Relationships:** 5 (Tenant→Memberships, Tenant→Accounts, User→Memberships, User→Accounts, Account→Transactions)
+- **Isolation Boundary:** Tenant (not User)
+- **Technology:** SQLAlchemy 2.0 + Alembic + PostgreSQL/SQLite
+
+**Multi-Tenant Features:**
+- Complete data isolation between tenant groups
+- Shared accounts and transactions within tenant
+- Role-based permissions enforced at service layer
+- JWT token contains tenant_id for authorization
+- Users can belong to multiple tenants
