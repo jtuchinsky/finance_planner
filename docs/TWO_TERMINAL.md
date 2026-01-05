@@ -6,10 +6,12 @@ A step-by-step guide to get Finance Planner and MCP_Auth running and test the AP
 
 1. Start MCP_Auth in Terminal 1 (port 8001)
 2. Start Finance Planner in Terminal 2 (port 8000)
-3. Get a JWT token from MCP_Auth
-4. Create and manage accounts using the Finance Planner API
-5. Add transactions and see automatic balance updates
-6. Try batch transaction import (1-100 transactions atomically)
+3. Register a user and get a JWT token with tenant context from MCP_Auth
+4. View your tenant information and members
+5. Create and manage shared accounts within your tenant
+6. Add transactions and see automatic balance updates
+7. Try batch transaction import (1-100 transactions atomically)
+8. (Optional) Invite family members to your tenant for collaborative finance tracking
 
 ## Prerequisites
 
@@ -186,6 +188,12 @@ curl -X POST http://127.0.0.1:8001/auth/register \
 }
 ```
 
+**What happens behind the scenes:**
+- A new user is created in MCP_Auth
+- A new **tenant** (family/household) is automatically created for you
+- You are assigned as the **OWNER** of that tenant
+- The tenant_id will be included in all JWT tokens
+
 **If user already exists:**
 ```json
 {
@@ -209,11 +217,22 @@ curl -X POST http://127.0.0.1:8001/auth/login \
 **Expected Response:**
 ```json
 {
-  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzM1NDk...",
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwidGVuYW50X2lkIjoiMSIsImV4cCI6MTczNTQ5...",
   "refresh_token": "...",
   "token_type": "bearer"
 }
 ```
+
+**What's in the JWT token:**
+```json
+{
+  "sub": "1",           // User ID
+  "tenant_id": "1",     // Your tenant ID (family/household)
+  "exp": 1735498765     // Expiration timestamp
+}
+```
+
+The `tenant_id` claim ensures you can only access data belonging to your tenant (family/household).
 
 ### Step 4: Store Token in Environment Variable
 
@@ -246,9 +265,62 @@ echo $TOKEN
 
 ---
 
-## Part 5: Workflow 1 - Create and Manage Accounts
+## Part 5: Tenant Management - View Your Household
 
-Now let's test the Finance Planner API with your JWT token.
+Finance Planner uses a multi-tenant architecture where each tenant represents a family or household. All members of a tenant share the same accounts and transactions.
+
+### Test 1: View Your Tenant Information
+
+```bash
+curl -X GET http://127.0.0.1:8000/api/tenants/me \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected Response:**
+```json
+{
+  "id": 1,
+  "name": "demo@example.com's Tenant",
+  "created_at": "2026-01-05T12:00:00",
+  "updated_at": "2026-01-05T12:00:00"
+}
+```
+
+✅ **This shows your tenant (family/household) details!**
+
+### Test 2: View All Tenant Members
+
+```bash
+curl -X GET http://127.0.0.1:8000/api/tenants/me/members \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+**Expected Response:**
+```json
+[
+  {
+    "id": 1,
+    "user_id": 1,
+    "auth_user_id": "1",
+    "role": "owner",
+    "created_at": "2026-01-05T12:00:00"
+  }
+]
+```
+
+**Role Hierarchy:**
+- **OWNER** (you) - Full control: manage members, change roles, all data operations
+- **ADMIN** - Invite/remove members, all data operations
+- **MEMBER** - Create/edit/delete accounts & transactions
+- **VIEWER** - Read-only access to all data
+
+✅ **You are the OWNER of your tenant!** You can invite family members later.
+
+---
+
+## Part 6: Workflow 1 - Create and Manage Accounts
+
+Now let's create accounts that all tenant members can access.
 
 ### Test 1: List Accounts (Should Be Empty Initially)
 
@@ -284,6 +356,7 @@ curl -X POST http://127.0.0.1:8000/api/accounts \
 ```json
 {
   "id": 1,
+  "tenant_id": 1,
   "user_id": 1,
   "name": "Chase Checking",
   "account_type": "checking",
@@ -293,7 +366,7 @@ curl -X POST http://127.0.0.1:8000/api/accounts \
 }
 ```
 
-✅ **Account created successfully!**
+✅ **Account created successfully!** This account is now shared with all members of your tenant.
 
 **Common Issues:**
 
@@ -333,6 +406,7 @@ curl -X POST http://127.0.0.1:8000/api/accounts \
 ```json
 {
   "id": 2,
+  "tenant_id": 1,
   "user_id": 1,
   "name": "High-Yield Savings",
   "account_type": "savings",
@@ -355,6 +429,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
   "items": [
     {
       "id": 1,
+      "tenant_id": 1,
       "user_id": 1,
       "name": "Chase Checking",
       "account_type": "checking",
@@ -364,6 +439,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
     },
     {
       "id": 2,
+      "tenant_id": 1,
       "user_id": 1,
       "name": "High-Yield Savings",
       "account_type": "savings",
@@ -376,7 +452,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
 }
 ```
 
-✅ **Both accounts visible!** Total balance: $15,000.00
+✅ **Both accounts visible to all tenant members!** Total balance: $15,000.00
 
 ### Test 5: Get Specific Account Details
 
@@ -389,6 +465,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts/1 \
 ```json
 {
   "id": 1,
+  "tenant_id": 1,
   "user_id": 1,
   "name": "Chase Checking",
   "account_type": "checking",
@@ -413,6 +490,7 @@ curl -X PATCH http://127.0.0.1:8000/api/accounts/1 \
 ```json
 {
   "id": 1,
+  "tenant_id": 1,
   "user_id": 1,
   "name": "Chase Checking - Personal",
   "account_type": "checking",
@@ -422,7 +500,7 @@ curl -X PATCH http://127.0.0.1:8000/api/accounts/1 \
 }
 ```
 
-✅ **Account name updated!** Note the `updated_at` timestamp changed.
+✅ **Account name updated!** Note the `updated_at` timestamp changed. All tenant members will see the new name.
 
 ### Test 7: Delete an Account
 
@@ -450,6 +528,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
   "items": [
     {
       "id": 1,
+      "tenant_id": 1,
       "user_id": 1,
       "name": "Chase Checking - Personal",
       "account_type": "checking",
@@ -466,7 +545,7 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
 
 ---
 
-## Part 6: Workflow 2 - Transaction Management
+## Part 7: Workflow 2 - Transaction Management
 
 Now let's add some transactions and see automatic balance updates!
 
@@ -647,7 +726,7 @@ curl -X DELETE http://127.0.0.1:8000/api/transactions/1 \
 
 ---
 
-## Part 7: Troubleshooting Common Issues
+## Part 8: Troubleshooting Common Issues
 
 ### Issue 1: 307 Temporary Redirect
 
@@ -708,7 +787,26 @@ curl -X POST http://127.0.0.1:8000/api/accounts/ \
 
    If they don't match, set them to the same value and restart both services.
 
-3. **Missing "Bearer" prefix**
+3. **Missing tenant_id in JWT token** (if you're using an old MCP_Auth version)
+
+   Finance Planner requires JWT tokens with a `tenant_id` claim. Verify your token contains it:
+   ```bash
+   # Decode token (requires jq or use https://jwt.io)
+   echo $TOKEN | cut -d'.' -f2 | base64 -d | python3 -m json.tool
+   ```
+
+   Expected output should include:
+   ```json
+   {
+     "sub": "1",
+     "tenant_id": "1",
+     "exp": ...
+   }
+   ```
+
+   If `tenant_id` is missing, update MCP_Auth to the latest version that includes multi-tenant support.
+
+4. **Missing "Bearer" prefix**
    ```bash
    # ✅ Correct
    curl -H "Authorization: Bearer $TOKEN" ...
@@ -767,7 +865,7 @@ echo $TOKEN
 
 ---
 
-## Part 7: Complete Example Session
+## Part 9: Complete Example Session
 
 Here's a full copy-paste example showing the entire workflow:
 
@@ -861,12 +959,13 @@ curl -X GET http://127.0.0.1:8000/api/accounts \
 
 ---
 
-## Part 8: Next Steps
+## Part 10: Next Steps
 
 Congratulations! You've successfully:
 - ✅ Started both MCP_Auth and Finance Planner
-- ✅ Obtained a JWT token
-- ✅ Created, listed, updated, and deleted accounts
+- ✅ Registered a user and obtained a JWT token with tenant_id
+- ✅ Viewed your tenant information and role
+- ✅ Created, listed, updated, and deleted shared accounts
 - ✅ Added transactions with automatic balance updates
 - ✅ Tried batch transaction import (1-100 transactions atomically)
 
@@ -877,6 +976,28 @@ Visit http://127.0.0.1:8000/docs for Swagger UI where you can:
 - Try all endpoints in your browser
 - See request/response schemas
 - Test with the "Try it out" button
+
+**Tenant Management:**
+Invite family members to collaborate on finances:
+```bash
+# Invite a family member (ADMIN/OWNER only)
+curl -X POST http://127.0.0.1:8000/api/tenants/me/members \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"auth_user_id": "spouse-user-id", "role": "member"}'
+
+# Update a member's role (OWNER only)
+curl -X PATCH http://127.0.0.1:8000/api/tenants/me/members/2/role \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"role": "admin"}'
+
+# Remove a member (ADMIN/OWNER only)
+curl -X DELETE http://127.0.0.1:8000/api/tenants/me/members/2 \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+See [MIGRATION_GUIDE.md](MIGRATION_GUIDE.md) for complete tenant management documentation.
 
 **Transaction Management:**
 See [RUNNING.md - Workflow 2](RUNNING.md#workflow-2-create-and-track-transactions) for:
@@ -915,9 +1036,15 @@ See [RUNNING.md - Common Issues](RUNNING.md#common-issues-and-troubleshooting) f
 
 **Key Points:**
 - SECRET_KEY must match in both .env files
-- JWT tokens expire after 15 minutes
+- JWT tokens expire after 15 minutes and must include `tenant_id` claim
 - MCP_Auth must start before Finance Planner
 - Use `Authorization: Bearer $TOKEN` header for all Finance Planner API calls
 - Watch for 307 redirects (trailing slash issues)
+
+**Multi-Tenant Architecture:**
+- Each user belongs to a tenant (family/household)
+- All accounts and transactions are shared within the tenant
+- Role-based access control: OWNER > ADMIN > MEMBER > VIEWER
+- You are the OWNER of your tenant with full control
 
 **Questions or issues?** Check [RUNNING.md](RUNNING.md) for comprehensive documentation.
