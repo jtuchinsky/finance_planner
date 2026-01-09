@@ -1,5 +1,86 @@
 import pytest
 from app.models.role import TenantRole
+from tests.conftest import create_test_token
+
+
+class TestListUserTenants:
+    """Tests for GET /api/tenants (list all user's tenants)"""
+
+    def test_list_user_tenants_single_tenant(self, client, db_session, test_user, shared_tenant, owner_membership):
+        """User can list all tenants they belong to (single tenant case)"""
+        # Create token WITHOUT tenant_id (this endpoint doesn't require tenant context)
+        token = create_test_token(user_id="test-user-123")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = client.get("/api/tenants", headers=headers)
+
+        assert response.status_code == 200
+        tenants = response.json()
+        assert len(tenants) == 1
+        assert tenants[0]["id"] == shared_tenant.id
+        assert tenants[0]["name"] == "Test Shared Tenant"
+        assert tenants[0]["role"] == TenantRole.OWNER
+        assert "created_at" in tenants[0]
+        assert "updated_at" in tenants[0]
+
+    def test_list_user_tenants_multiple_tenants(self, client, db_session, test_user):
+        """User can see all tenants they belong to (multiple tenants)"""
+        from app.models.tenant import Tenant
+        from app.models.tenant_membership import TenantMembership
+
+        # Create three tenants
+        tenant1 = Tenant(name="Personal Finances")
+        tenant2 = Tenant(name="Family Budget")
+        tenant3 = Tenant(name="Business Account")
+        db_session.add_all([tenant1, tenant2, tenant3])
+        db_session.commit()
+
+        # Add user as member of all three with different roles
+        membership1 = TenantMembership(tenant_id=tenant1.id, user_id=test_user.id, role=TenantRole.OWNER)
+        membership2 = TenantMembership(tenant_id=tenant2.id, user_id=test_user.id, role=TenantRole.ADMIN)
+        membership3 = TenantMembership(tenant_id=tenant3.id, user_id=test_user.id, role=TenantRole.MEMBER)
+        db_session.add_all([membership1, membership2, membership3])
+        db_session.commit()
+
+        # Create token WITHOUT tenant_id
+        token = create_test_token(user_id="test-user-123")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = client.get("/api/tenants", headers=headers)
+
+        assert response.status_code == 200
+        tenants = response.json()
+        assert len(tenants) == 3
+
+        # Verify each tenant has correct role
+        tenant_map = {t["name"]: t for t in tenants}
+        assert tenant_map["Personal Finances"]["role"] == TenantRole.OWNER
+        assert tenant_map["Family Budget"]["role"] == TenantRole.ADMIN
+        assert tenant_map["Business Account"]["role"] == TenantRole.MEMBER
+
+    def test_list_user_tenants_empty_list(self, client, db_session):
+        """User with no tenant memberships gets empty list"""
+        from app.models.user import User
+
+        # Create user with no tenant memberships
+        new_user = User(auth_user_id="user-no-tenants")
+        db_session.add(new_user)
+        db_session.commit()
+
+        token = create_test_token(user_id="user-no-tenants")
+        headers = {"Authorization": f"Bearer {token}"}
+
+        response = client.get("/api/tenants", headers=headers)
+
+        assert response.status_code == 200
+        tenants = response.json()
+        assert len(tenants) == 0
+        assert tenants == []
+
+    def test_list_user_tenants_requires_auth(self, client):
+        """Endpoint requires authentication"""
+        response = client.get("/api/tenants")
+        assert response.status_code == 401
 
 
 class TestGetCurrentTenant:

@@ -7,12 +7,13 @@ Complete documentation of all REST API endpoints with sequence diagrams showing 
 - [Architecture Overview](#architecture-overview)
 - [Authentication Flow](#authentication-flow)
 - [Tenant Endpoints](#tenant-endpoints)
-  - [Get Current Tenant](#1-get-current-tenant)
-  - [Update Tenant](#2-update-tenant)
-  - [List Members](#3-list-members)
-  - [Invite Member](#4-invite-member)
-  - [Update Member Role](#5-update-member-role)
-  - [Remove Member](#6-remove-member)
+  - [List User Tenants](#1-list-user-tenants)
+  - [Get Current Tenant](#2-get-current-tenant)
+  - [Update Tenant](#3-update-tenant)
+  - [List Members](#4-list-members)
+  - [Invite Member](#5-invite-member)
+  - [Update Member Role](#6-update-member-role)
+  - [Remove Member](#7-remove-member)
 - [Account Endpoints](#account-endpoints)
   - [Create Account](#1-create-account)
   - [List Accounts](#2-list-accounts)
@@ -149,7 +150,57 @@ TenantContext(
 
 Base path: `/api/tenants`
 
-## 1. Get Current Tenant
+## 1. List User Tenants
+
+**Endpoint:** `GET /api/tenants`
+**Authentication:** Required (no tenant context needed)
+**Response:** `List[UserTenantResponse]` (200 OK)
+
+### Business Logic
+
+1. Lists all tenants that the authenticated user belongs to
+2. Includes the user's role in each tenant
+3. Does NOT require tenant_id in JWT (unlike other endpoints)
+4. Useful for tenant switching functionality
+5. Returns empty array if user has no tenant memberships
+
+### Example Response
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Smith Family",
+    "role": "owner",
+    "created_at": "2026-01-05T12:00:00",
+    "updated_at": "2026-01-05T12:00:00"
+  },
+  {
+    "id": 2,
+    "name": "Personal Finances",
+    "role": "member",
+    "created_at": "2026-01-06T10:00:00",
+    "updated_at": "2026-01-06T10:00:00"
+  }
+]
+```
+
+### Use Cases
+
+- **Tenant Switching**: List all available tenants for user to choose from
+- **Multi-Tenant Dashboard**: Display all tenants user belongs to
+- **Initial Login**: Determine which tenant to use if user belongs to multiple
+
+### Security Notes
+
+- Uses `get_current_user` dependency (not `get_tenant_context`)
+- JWT token should NOT include `tenant_id` claim for this endpoint
+- Users can only see tenants they are members of
+- Complete multi-tenant isolation maintained
+
+---
+
+## 2. Get Current Tenant
 
 **Endpoint:** `GET /api/tenants/me`
 **Authentication:** Required
@@ -173,7 +224,7 @@ Base path: `/api/tenants`
 
 ---
 
-## 2. Update Tenant
+## 3. Update Tenant
 
 **Endpoint:** `PATCH /api/tenants/me`
 **Authentication:** Required (OWNER only)
@@ -196,7 +247,7 @@ Base path: `/api/tenants`
 
 ---
 
-## 3. List Members
+## 4. List Members
 
 **Endpoint:** `GET /api/tenants/me/members`
 **Authentication:** Required
@@ -231,7 +282,7 @@ Base path: `/api/tenants`
 
 ---
 
-## 4. Invite Member
+## 5. Invite Member
 
 **Endpoint:** `POST /api/tenants/me/members`
 **Authentication:** Required (ADMIN or OWNER)
@@ -263,7 +314,7 @@ Base path: `/api/tenants`
 
 ---
 
-## 5. Update Member Role
+## 6. Update Member Role
 
 **Endpoint:** `PATCH /api/tenants/me/members/{user_id}/role`
 **Authentication:** Required (OWNER only)
@@ -294,7 +345,7 @@ Base path: `/api/tenants`
 
 ---
 
-## 6. Remove Member
+## 7. Remove Member
 
 **Endpoint:** `DELETE /api/tenants/me/members/{user_id}`
 **Authentication:** Required (ADMIN or OWNER)

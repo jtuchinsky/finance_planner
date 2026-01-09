@@ -2,8 +2,9 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_tenant_context
+from app.dependencies import get_tenant_context, get_current_user
 from app.models.tenant_context import TenantContext
+from app.models.user import User
 from app.services.tenant_service import TenantService
 from app.schemas.tenant_schemas import (
     TenantResponse,
@@ -12,9 +13,26 @@ from app.schemas.tenant_schemas import (
     TenantInviteRequest,
     TenantRoleUpdate,
     TenantMemberRemoveResponse,
+    UserTenantResponse,
 )
 
 router = APIRouter()
+
+
+@router.get("", response_model=list[UserTenantResponse])
+async def list_user_tenants(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List all tenants the authenticated user belongs to.
+
+    Returns list of tenants with the user's role in each tenant.
+    This endpoint does not require a tenant context - it lists ALL tenants
+    the user is a member of, which is useful for tenant switching.
+    """
+    service = TenantService(db)
+    return service.list_user_tenants(user)
 
 
 @router.get("/me", response_model=TenantResponse)

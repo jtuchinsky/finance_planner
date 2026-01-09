@@ -54,3 +54,15 @@ class TenantMemberRemoveResponse(BaseModel):
 
     message: str
     removed_user_id: int
+
+
+class UserTenantResponse(BaseModel):
+    """User's tenant with membership info (for listing all tenants)"""
+
+    id: int
+    name: str
+    role: TenantRole
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

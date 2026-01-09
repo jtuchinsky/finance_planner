@@ -28,6 +28,33 @@ class TenantService:
         self.membership_repo = TenantMembershipRepository(db)
         self.user_repo = UserRepository(db)
 
+    def list_user_tenants(self, user: User) -> list[dict]:
+        """
+        List all tenants that a user belongs to.
+
+        Args:
+            user: Authenticated user
+
+        Returns:
+            List of tenants with user's role in each tenant
+        """
+        memberships = self.membership_repo.get_user_memberships(user.id)
+
+        result = []
+        for membership in memberships:
+            tenant = self.tenant_repo.get_by_id(membership.tenant_id)
+            if tenant:
+                result.append(
+                    {
+                        "id": tenant.id,
+                        "name": tenant.name,
+                        "role": membership.role,
+                        "created_at": tenant.created_at,
+                        "updated_at": tenant.updated_at,
+                    }
+                )
+        return result
+
     def get_current_tenant(self, context: TenantContext) -> Tenant:
         """
         Get current tenant details.
