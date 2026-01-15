@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Multi-tenant personal finance tracker that integrates with MCP_Auth (https://github.com/jtuchinsky/MCP_Auth) for JWT authentication. Built with FastAPI following a layered architecture pattern.
+Multi-tenant family/household finance tracker that integrates with MCP_Auth (https://github.com/jtuchinsky/MCP_Auth) for JWT authentication and tenant management. Built with FastAPI following a layered architecture pattern.
+
+**Key Characteristics:**
+- **Tenant-based isolation**: Accounts and transactions belong to tenants (families/households), not individual users
+- **Role-based permissions**: Four-tier role hierarchy (OWNER → ADMIN → MEMBER → VIEWER)
+- **Collaborative**: Multiple users can access and manage shared finances within a tenant
+- **Multi-tenant users**: Users can belong to multiple tenants with different roles
 
 ## Environment Setup
 
@@ -111,26 +117,33 @@ app/
 ├── main.py                 # FastAPI app, exception handlers, CORS
 ├── config.py              # Pydantic settings from .env
 ├── database.py            # SQLAlchemy session factory
-├── dependencies.py        # FastAPI dependencies (JWT validation)
+├── dependencies.py        # FastAPI dependencies (get_tenant_context with JWT)
 ├── core/
 │   ├── security.py       # JWT decode/validate functions
 │   └── exceptions.py     # Custom exception classes
 ├── models/
 │   ├── base.py           # SQLAlchemy Base + TimestampMixin
 │   ├── user.py           # User model (tracks MCP_Auth user_id)
-│   ├── account.py        # Account model with AccountType enum
-│   └── transaction.py    # Transaction model
+│   ├── tenant.py         # Tenant model (family/household)
+│   ├── tenant_membership.py  # TenantMembership with role
+│   ├── account.py        # Account model (tenant-scoped, shared)
+│   └── transaction.py    # Transaction model (via account)
 ├── schemas/
+│   ├── tenant_schemas.py       # Tenant and membership schemas
 │   ├── account_schemas.py      # Pydantic request/response models
 │   └── transaction_schemas.py  # Transaction schemas + batch operations
 ├── repositories/
 │   ├── user_repository.py      # User data access + auto-create
-│   ├── account_repository.py   # Account CRUD with user_id filtering
+│   ├── tenant_repository.py    # Tenant CRUD
+│   ├── tenant_membership_repository.py  # Membership CRUD + role checks
+│   ├── account_repository.py   # Account CRUD with tenant_id filtering
 │   └── transaction_repository.py # Transaction CRUD + batch operations
 ├── services/
-│   ├── account_service.py      # Account business logic
+│   ├── tenant_service.py       # Tenant management + member invites
+│   ├── account_service.py      # Account business logic + permission checks
 │   └── transaction_service.py  # Transaction business logic + balance updates
 └── routes/
+    ├── tenant_routes.py        # Tenant management API
     ├── account_routes.py       # Account API endpoints
     └── transaction_routes.py   # Transaction API endpoints + batch creation
 ```
@@ -138,38 +151,68 @@ app/
 ## Key Patterns and Conventions
 
 ### Multi-Tenant Isolation
-**CRITICAL:** All data queries MUST filter by `user_id` to prevent cross-user data access.
+**CRITICAL:** All data queries MUST filter by `tenant_id` to prevent cross-tenant data access. Tenants represent families/households, not individual users.
 
 ```python
-# ✅ CORRECT - Always filter by user_id
-accounts = db.query(Account).filter(Account.user_id == user.id).all()
+# ✅ CORRECT - Always filter by tenant_id
+accounts = db.query(Account).filter(Account.tenant_id == tenant.id).all()
 
-# ❌ WRONG - No user_id filter allows access to all users' data
+# ❌ WRONG - No tenant_id filter allows access to all tenants' data
 accounts = db.query(Account).all()
 ```
 
 Repositories enforce this pattern automatically. Always use repository methods.
 
-### Authentication Flow
-1. User obtains JWT from MCP_Auth (`/auth/login` or `/auth/register`)
-2. Client sends JWT in `Authorization: Bearer <token>` header
-3. `get_current_user()` dependency validates JWT using shared SECRET_KEY
-4. Extracts `auth_user_id` from JWT `sub` claim
-5. Auto-creates User record on first request
-6. All endpoints receive authenticated `User` object
+**Important:** The `user_id` field on Account is legacy and will be removed. All new features MUST use `tenant_id` for isolation.
 
-### Repository Pattern
-Repositories handle ALL database access with built-in multi-tenant filtering:
+### Authentication Flow
+1. User obtains JWT from MCP_Auth (`/auth/login` or `/auth/register`) with `tenant_id` claim
+2. Client sends JWT in `Authorization: Bearer <token>` header
+3. `get_tenant_context()` dependency validates JWT using shared SECRET_KEY
+4. Extracts `auth_user_id` from JWT `sub` claim and `tenant_id` from custom claim
+5. Auto-creates User record on first request
+6. Verifies user is a member of the tenant via TenantMembership
+7. All endpoints receive `TenantContext` object containing `user`, `tenant`, and `role`
+
+### Role-Based Permissions
+Four-tier role hierarchy enforced in service layer:
+
+| Role | Can Do | Service Methods |
+|------|--------|----------------|
+| **OWNER** | Everything + manage roles + update tenant | `require_owner()` |
+| **ADMIN** | Invite/remove members + all data ops | `require_admin()` |
+| **MEMBER** | Create/update/delete accounts & transactions | `require_member()` |
+| **VIEWER** | Read-only access | Default (no check needed) |
+
+Permission checks happen in service methods BEFORE repository calls:
 
 ```python
 # In service layer
-def get_account(self, account_id: int, user: User) -> Account:
-    # Repository ensures account belongs to user
-    account = self.repo.get_by_id_and_user(account_id, user.id)
+def update_account(self, account_id: int, update_data, tenant_ctx: TenantContext):
+    # Check permissions first
+    self.require_member(tenant_ctx.role)
+
+    # Then proceed with business logic
+    account = self.repo.get_by_id_and_tenant(account_id, tenant_ctx.tenant.id)
+    if not account:
+        raise NotFoundException("Account not found")
+    return self.repo.update(account, update_data)
+```
+
+### Repository Pattern
+Repositories handle ALL database access with built-in tenant-based filtering:
+
+```python
+# In service layer
+def get_account(self, account_id: int, tenant_ctx: TenantContext) -> Account:
+    # Repository ensures account belongs to tenant
+    account = self.repo.get_by_id_and_tenant(account_id, tenant_ctx.tenant.id)
     if not account:
         raise NotFoundException("Account not found")
     return account
 ```
+
+**Migration Note:** Some repositories still have `_by_user` methods for backwards compatibility, but all new code should use `_by_tenant` methods.
 
 ### Service Layer
 Services contain business logic and orchestration:
@@ -190,18 +233,36 @@ raise ValidationException("Invalid amount")   # → 400
 
 ## Database Models
 
+### Tenant
+- `id`: Primary key
+- `name`: Tenant name (e.g., "Smith Family")
+- Represents a family/household that shares finances
+- Relationships: `memberships` (cascade delete), `accounts` (cascade delete)
+
+### TenantMembership
+- `id`: Primary key
+- `tenant_id`: Foreign key to Tenant (indexed)
+- `user_id`: Foreign key to User (indexed)
+- `role`: Enum (OWNER, ADMIN, MEMBER, VIEWER)
+- Unique constraint on (tenant_id, user_id) - user can only have one role per tenant
+- Links users to tenants with specific permissions
+
 ### User
 - `id`: Internal primary key
 - `auth_user_id`: User ID from MCP_Auth (from JWT `sub` claim)
-- Relationships: `accounts` (cascade delete)
+- No password stored (handled by MCP_Auth)
+- Can belong to multiple tenants via TenantMembership
+- Relationships: `memberships` (cascade delete)
 
 ### Account
 - `id`: Primary key
-- `user_id`: Foreign key to User (indexed for multi-tenant queries)
+- `tenant_id`: Foreign key to Tenant (indexed) - **PRIMARY ISOLATION BOUNDARY**
+- `user_id`: Foreign key to User (DEPRECATED, will be removed)
 - `name`: Account name (e.g., "Chase Checking")
 - `account_type`: Enum (checking, savings, credit_card, investment, loan, other)
 - `balance`: Decimal(15,2) - updated by transaction service
-- Relationships: `user`, `transactions` (cascade delete)
+- **Shared within tenant** - all tenant members can access based on role
+- Relationships: `tenant`, `transactions` (cascade delete)
 
 ### Transaction
 - `id`: Primary key
@@ -240,32 +301,52 @@ response = client.get("/api/accounts", headers=headers)
 ```
 
 ### Multi-Tenancy Tests
-ALWAYS test that users cannot access other users' data:
+ALWAYS test that users in different tenants cannot access each other's data:
 
 ```python
-def test_user_cannot_access_other_user_account():
-    # User A creates account
-    token_a = create_test_token("user-a")
+def test_user_cannot_access_other_tenant_account():
+    # User A in Tenant 1 creates account
+    token_a = create_test_token("user-a", tenant_id=1)
     account = client.post("/api/accounts", headers={"Authorization": f"Bearer {token_a}"},
-                         json={"name": "A's Account", "account_type": "checking"})
+                         json={"name": "Tenant 1 Account", "account_type": "checking"})
 
-    # User B tries to access
-    token_b = create_test_token("user-b")
+    # User B in Tenant 2 tries to access
+    token_b = create_test_token("user-b", tenant_id=2)
     response = client.get(f"/api/accounts/{account.json()['id']}",
                          headers={"Authorization": f"Bearer {token_b}"})
 
     assert response.status_code == 404  # Must not reveal account exists
+
+def test_viewer_cannot_create_account():
+    # User with VIEWER role cannot create accounts
+    token = create_test_token("user-viewer", tenant_id=1, role="VIEWER")
+    response = client.post("/api/accounts", headers={"Authorization": f"Bearer {token}"},
+                          json={"name": "New Account", "account_type": "checking"})
+
+    assert response.status_code == 403  # Forbidden - insufficient permissions
 ```
 
 ## Common Tasks
 
 ### Adding a New Endpoint
 1. Define Pydantic schemas in `app/schemas/`
-2. Add repository method with user_id filtering in `app/repositories/`
-3. Add service method with business logic in `app/services/`
-4. Add route in `app/routes/`
+2. Add repository method with tenant_id filtering in `app/repositories/`
+3. Add service method with business logic + role checks in `app/services/`
+4. Add route with `get_tenant_context` dependency in `app/routes/`
 5. Register router in `app/main.py`
-6. Write tests with multi-tenancy checks
+6. Write tests with multi-tenancy checks AND permission checks
+
+Example route structure:
+```python
+@router.post("/")
+def create_resource(
+    data: ResourceCreate,
+    tenant_ctx: TenantContext = Depends(get_tenant_context),
+    db: Session = Depends(get_db)
+):
+    service = ResourceService(db)
+    return service.create(data, tenant_ctx)  # Service checks permissions
+```
 
 ### Adding a New Model
 1. Create model in `app/models/`
