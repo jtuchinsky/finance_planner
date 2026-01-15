@@ -57,26 +57,26 @@ The Finance Planner uses a relational database with five core tables designed fo
          │                  │              │ 1
          │                  │              │
          │                  │              │ has many
-┌────────▼──────────────┐  │              │
-│        users          │  │              │ N
-├───────────────────────┤  │   ┌──────────▼──────────────┐
-│ PK │ id               │◄─┘   │     transactions        │
+┌────────▼──────────────┐   │              │
+│        users          │   │              │ N
+├───────────────────────┤   │   ┌──────────▼──────────────┐
+│ PK │ id               │◄─-┘   │     transactions        │
 │ UK │ auth_user_id     │◄──── JWT 'sub' claim from MCP_Auth
-│    │ created_at       │      ├─────────────────────────┤
-│    │ updated_at       │      │ PK │ id                 │
-└───────────────────────┘      │ FK │ account_id         │───────► accounts.id (CASCADE)
-                               │ IDX│ date               │
-                               │ IDX│ category           │
-                               │    │ amount             │◄────── Numeric(15,2) (+income/-expense)
-                               │    │ description        │
-                               │    │ merchant           │
-                               │    │ location           │
-                               │    │ tags               │◄────── JSON array
-                               │ IDX│ der_category       │◄────── Derived/calculated category
-                               │    │ der_merchant       │◄────── Derived/calculated merchant
-                               │    │ created_at         │
-                               │    │ updated_at         │
-                               └─────────────────────────┘
+│    │ created_at       │       ├─────────────────────────┤
+│    │ updated_at       │       │ PK │ id                 │
+└───────────────────────┘       │ FK │ account_id         │───────► accounts.id (CASCADE)
+                                │ IDX│ date               │
+                                │ IDX│ category           │
+                                │    │ amount             │◄────── Numeric(15,2) (+income/-expense)
+                                │    │ description        │
+                                │    │ merchant           │
+                                │    │ location           │
+                                │    │ tags               │◄────── JSON array
+                                │ IDX│ der_category       │◄────── Derived/calculated category
+                                │    │ der_merchant       │◄────── Derived/calculated merchant
+                                │    │ created_at         │
+                                │    │ updated_at         │
+                                └─────────────────────────┘
 
 Composite Indexes:
   • tenant_memberships (tenant_id, user_id) - Unique membership lookup
@@ -163,19 +163,19 @@ erDiagram
 
 #### Columns
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Tenant ID |
-| `name` | String(255) | NOT NULL | Tenant name (e.g., "Smith Family", "Acme Corporation") |
-| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
-| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+| Column       | Type        | Constraints                              | Description                                            |
+|--------------|-------------|------------------------------------------|--------------------------------------------------------|
+| `id`         | Integer     | PRIMARY KEY, AUTOINCREMENT               | Tenant ID                                              |
+| `name`       | String(255) | NOT NULL                                 | Tenant name (e.g., "Smith Family", "Acme Corporation") |
+| `created_at` | DateTime    | NOT NULL, DEFAULT now()                  | Record creation timestamp (from TimestampMixin)        |
+| `updated_at` | DateTime    | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin)            |
 
 #### Relationships
 
-| Relationship | Type | Target | Cascade | Back-Populates |
-|--------------|------|--------|---------|----------------|
-| `memberships` | One-to-Many | `tenant_memberships` table | `all, delete-orphan` | `tenant_membership.tenant` |
-| `accounts` | One-to-Many | `accounts` table | `all, delete-orphan` | `account.tenant` |
+| Relationship  | Type          | Target                       | Cascade                | Back-Populates               |
+|---------------|---------------|------------------------------|------------------------|------------------------------|
+| `memberships` | One-to-Many   | `tenant_memberships` table   | `all, delete-orphan`   | `tenant_membership.tenant`   |
+| `accounts`    | One-to-Many   | `accounts` table             | `all, delete-orphan`   | `account.tenant`             |
 
 **Cascade Behavior:** When a tenant is deleted, all associated memberships and accounts (and their transactions) are automatically deleted.
 
@@ -200,21 +200,21 @@ erDiagram
 
 #### Columns
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Membership ID |
-| `tenant_id` | Integer | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant this membership belongs to (CASCADE on delete) |
-| `user_id` | Integer | FOREIGN KEY (users.id), NOT NULL, INDEXED | User who is a member (CASCADE on delete) |
-| `role` | Enum(TenantRole) | NOT NULL, DEFAULT 'member' | Permission level (OWNER, ADMIN, MEMBER, VIEWER) |
-| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
-| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+| Column       | Type             | Constraints                                 | Description                                           |
+|--------------|------------------|---------------------------------------------|-------------------------------------------------------|
+| `id`         | Integer          | PRIMARY KEY, AUTOINCREMENT                  | Membership ID                                         |
+| `tenant_id`  | Integer          | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant this membership belongs to (CASCADE on delete) |
+| `user_id`    | Integer          | FOREIGN KEY (users.id), NOT NULL, INDEXED   | User who is a member (CASCADE on delete)              |
+| `role`       | Enum(TenantRole) | NOT NULL, DEFAULT 'member'                  | Permission level (OWNER, ADMIN, MEMBER, VIEWER)       |
+| `created_at` | DateTime         | NOT NULL, DEFAULT now()                     | Record creation timestamp (from TimestampMixin)       |
+| `updated_at` | DateTime         | NOT NULL, DEFAULT now(), ON UPDATE now()    | Last update timestamp (from TimestampMixin)           |
 
 #### Relationships
 
-| Relationship | Type | Target | Cascade | Back-Populates |
-|--------------|------|--------|---------|----------------|
-| `tenant` | Many-to-One | `tenants` table | N/A (child) | `tenant.memberships` |
-| `user` | Many-to-One | `users` table | N/A (child) | `user.memberships` |
+| Relationship | Type          | Target            | Cascade       | Back-Populates         |
+|--------------|---------------|-------------------|---------------|------------------------|
+| `tenant`     | Many-to-One   | `tenants` table   | N/A (child)   | `tenant.memberships`   |
+| `user`       | Many-to-One   | `users` table     | N/A (child)   | `user.memberships`     |
 
 **Cascade Behavior:**
 - When a tenant is deleted → all memberships deleted (via `tenant.memberships` cascade)
@@ -250,19 +250,19 @@ erDiagram
 
 #### Columns
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Internal user ID |
-| `auth_user_id` | String(255) | UNIQUE, NOT NULL, INDEXED | User ID from JWT 'sub' claim (from MCP_Auth) |
-| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
-| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+| Column         | Type        | Constraints                              | Description                                     |
+|----------------|-------------|------------------------------------------|-------------------------------------------------|
+| `id`           | Integer     | PRIMARY KEY, AUTOINCREMENT               | Internal user ID                                |
+| `auth_user_id` | String(255) | UNIQUE, NOT NULL, INDEXED                | User ID from JWT 'sub' claim (from MCP_Auth)    |
+| `created_at`   | DateTime    | NOT NULL, DEFAULT now()                  | Record creation timestamp (from TimestampMixin) |
+| `updated_at`   | DateTime    | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin)     |
 
 #### Relationships
 
-| Relationship | Type | Target | Cascade | Back-Populates |
-|--------------|------|--------|---------|----------------|
-| `memberships` | One-to-Many | `tenant_memberships` table | `all, delete-orphan` | `tenant_membership.user` |
-| `accounts` | One-to-Many | `accounts` table | `all, delete-orphan` | `account.user` |
+| Relationship    | Type          | Target                       | Cascade                                        | Back-Populates |
+|-----------------|---------------|------------------------------|------------------------------------------------|----------------|
+| `memberships`   | One-to-Many   | `tenant_memberships` table   | `all, delete-orphan`  `tenant_membership.user` |
+| `accounts`      | One-to-Many   | `accounts` table             | `all, delete-orphan`                           | `account.user` |
 
 **Cascade Behavior:**
 - When a user is deleted, all associated memberships are automatically deleted
@@ -291,24 +291,24 @@ erDiagram
 
 #### Columns
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Account ID |
-| `tenant_id` | Integer | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant who owns this account (CASCADE on delete) |
-| `user_id` | Integer | FOREIGN KEY (users.id), NOT NULL, INDEXED | User who created the account (legacy, for audit trail) |
-| `name` | String(255) | NOT NULL | Account name (e.g., "Chase Checking") |
-| `account_type` | Enum | NOT NULL | Type of account (see AccountType enum) |
-| `balance` | Numeric(15,2) | NOT NULL, DEFAULT 0.00 | Current balance (auto-calculated from transactions) |
-| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
-| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+| Column         | Type          | Constraints                                 | Description                                            |
+|----------------|---------------|---------------------------------------------|--------------------------------------------------------|
+| `id`           | Integer       | PRIMARY KEY, AUTOINCREMENT                  | Account ID                                             |
+| `tenant_id`    | Integer       | FOREIGN KEY (tenants.id), NOT NULL, INDEXED | Tenant who owns this account (CASCADE on delete)       |
+| `user_id`      | Integer       | FOREIGN KEY (users.id), NOT NULL, INDEXED   | User who created the account (legacy, for audit trail) |
+| `name`         | String(255)   | NOT NULL                                    | Account name (e.g., "Chase Checking")                  |
+| `account_type` | Enum          | NOT NULL                                    | Type of account (see AccountType enum)                 |
+| `balance`      | Numeric(15,2) | NOT NULL, DEFAULT 0.00                      | Current balance (auto-calculated from transactions)    |
+| `created_at`   | DateTime      | NOT NULL, DEFAULT now()                     | Record creation timestamp (from TimestampMixin)        |
+| `updated_at`   | DateTime      | NOT NULL, DEFAULT now(), ON UPDATE now()    | Last update timestamp (from TimestampMixin)            |
 
 #### Relationships
 
-| Relationship | Type | Target | Cascade | Back-Populates |
-|--------------|------|--------|---------|----------------|
-| `tenant` | Many-to-One | `tenants` table | N/A (child) | `tenant.accounts` |
-| `user` | Many-to-One | `users` table | N/A (child) | `user.accounts` |
-| `transactions` | One-to-Many | `transactions` table | `all, delete-orphan` | `transaction.account` |
+| Relationship   | Type          | Target               | Cascade              | Back-Populates        |
+|----------------|---------------|----------------------|----------------------|-----------------------|
+| `tenant`       | Many-to-One   | `tenants` table      | N/A (child)          | `tenant.accounts`     |
+| `user`         | Many-to-One   | `users` table        | N/A (child)          | `user.accounts`       |
+| `transactions` | One-to-Many   | `transactions` table | `all, delete-orphan` | `transaction.account` |
 
 **Cascade Behavior:**
 - When a tenant is deleted → all accounts deleted (via `tenant.accounts` cascade)
@@ -344,27 +344,27 @@ erDiagram
 
 #### Columns
 
-| Column | Type | Constraints | Description |
-|--------|------|-------------|-------------|
-| `id` | Integer | PRIMARY KEY, AUTOINCREMENT | Transaction ID |
-| `account_id` | Integer | FOREIGN KEY (accounts.id), NOT NULL, INDEXED | Associated account (CASCADE on delete) |
-| `amount` | Numeric(15,2) | NOT NULL | Transaction amount (positive=income, negative=expense) |
-| `date` | Date | NOT NULL, INDEXED | Transaction date |
-| `category` | String(100) | NOT NULL, INDEXED | Transaction category (e.g., "groceries", "salary") |
-| `description` | Text | NULLABLE | Optional detailed description |
-| `merchant` | String(255) | NULLABLE | Optional merchant name (e.g., "Whole Foods") |
-| `location` | String(255) | NULLABLE | Optional location (e.g., "Seattle, WA") |
-| `tags` | JSON | NULLABLE, DEFAULT [] | Array of string tags for flexible categorization |
-| `der_category` | String(100) | NULLABLE, INDEXED | Derived/calculated category (from ML/AI, manual overrides, or normalized values) |
-| `der_merchant` | String(255) | NULLABLE | Derived/calculated merchant (from ML/AI, manual overrides, or normalized values) |
-| `created_at` | DateTime | NOT NULL, DEFAULT now() | Record creation timestamp (from TimestampMixin) |
-| `updated_at` | DateTime | NOT NULL, DEFAULT now(), ON UPDATE now() | Last update timestamp (from TimestampMixin) |
+| Column         | Type          | Constraints                                  | Description                                                                      |
+|----------------|---------------|----------------------------------------------|----------------------------------------------------------------------------------|
+| `id`           | Integer       | PRIMARY KEY, AUTOINCREMENT                   | Transaction ID                                                                   |
+| `account_id`   | Integer       | FOREIGN KEY (accounts.id), NOT NULL, INDEXED | Associated account (CASCADE on delete)                                           |
+| `amount`       | Numeric(15,2) | NOT NULL                                     | Transaction amount (positive=income, negative=expense)                           |
+| `date`         | Date          | NOT NULL, INDEXED                            | Transaction date                                                                 |
+| `category`     | String(100)   | NOT NULL, INDEXED                            | Transaction category (e.g., "groceries", "salary")                               |
+| `description`  | Text          | NULLABLE                                     | Optional detailed description                                                    |
+| `merchant`     | String(255)   | NULLABLE                                     | Optional merchant name (e.g., "Whole Foods")                                     |
+| `location`     | String(255)   | NULLABLE                                     | Optional location (e.g., "Seattle, WA")                                          |
+| `tags`         | JSON          | NULLABLE, DEFAULT []                         | Array of string tags for flexible categorization                                 |
+| `der_category` | String(100)   | NULLABLE, INDEXED                            | Derived/calculated category (from ML/AI, manual overrides, or normalized values) |
+| `der_merchant` | String(255)   | NULLABLE                                     | Derived/calculated merchant (from ML/AI, manual overrides, or normalized values) |
+| `created_at`   | DateTime      | NOT NULL, DEFAULT now()                      | Record creation timestamp (from TimestampMixin)                                  |
+| `updated_at`   | DateTime      | NOT NULL, DEFAULT now(), ON UPDATE now()     | Last update timestamp (from TimestampMixin)                                      |
 
 #### Relationships
 
-| Relationship | Type | Target | Cascade | Back-Populates |
-|--------------|------|--------|---------|----------------|
-| `account` | Many-to-One | `accounts` table | N/A (child) | `account.transactions` |
+| Relationship | Type          | Target             | Cascade       | Back-Populates           |
+|--------------|---------------|--------------------|---------------|--------------------------|
+| `account`    | Many-to-One   | `accounts` table   | N/A (child)   | `account.transactions`   |
 
 **Cascade Behavior:**
 - When an account is deleted → all transactions deleted (via `account.transactions` cascade)
@@ -406,12 +406,12 @@ erDiagram
 
 **Values:**
 
-| Value | Description | Permission Level |
-|-------|-------------|------------------|
-| `owner` | Full control over tenant - manage members, change roles, update tenant settings, all data operations | Highest (4) |
-| `admin` | Invite/remove members, all data operations | High (3) |
-| `member` | Create, edit, and delete accounts & transactions | Medium (2) |
-| `viewer` | Read-only access to all data | Low (1) |
+| Value     | Description                                                                                            | Permission Level |
+|-----------|--------------------------------------------------------------------------------------------------------|------------------|
+| `owner`   | Full control over tenant - manage members, change roles, update tenant settings, all data operations   | Highest (4)      |
+| `admin`   | Invite/remove members, all data operations                                                             | High (3)         |
+| `member`  | Create, edit, and delete accounts & transactions                                                       | Medium (2)       |
+| `viewer`  | Read-only access to all data                                                                           | Low (1)          |
 
 **Role Hierarchy:**
 ```
@@ -420,17 +420,17 @@ OWNER (4) > ADMIN (3) > MEMBER (2) > VIEWER (1)
 
 **Permission Matrix:**
 
-| Action | OWNER | ADMIN | MEMBER | VIEWER |
-|--------|-------|-------|--------|--------|
-| View accounts & transactions | ✅ | ✅ | ✅ | ✅ |
-| Create accounts | ✅ | ✅ | ✅ | ❌ |
-| Edit/delete accounts | ✅ | ✅ | ✅ | ❌ |
-| Create transactions | ✅ | ✅ | ✅ | ❌ |
-| Edit/delete transactions | ✅ | ✅ | ✅ | ❌ |
-| Invite members | ✅ | ✅ | ❌ | ❌ |
-| Remove members | ✅ | ✅ | ❌ | ❌ |
-| Change member roles | ✅ | ❌ | ❌ | ❌ |
-| Update tenant name | ✅ | ❌ | ❌ | ❌ |
+| Action                         | OWNER | ADMIN | MEMBER | VIEWER |
+|--------------------------------|-------|-------|--------|------|
+| View accounts & transactions   | ✅     | ✅     | ✅      | ✅    |
+| Create accounts                | ✅     | ✅     | ✅      | ❌    |
+| Edit/delete accounts           | ✅     | ✅     | ✅      | ❌    |
+| Create transactions            | ✅     | ✅     | ✅      | ❌    |
+| Edit/delete transactions       | ✅     | ✅     | ✅      | ❌    |
+| Invite members                 | ✅     | ✅     | ❌      | ❌    |
+| Remove members                 | ✅     | ✅     | ❌      | ❌    |
+| Change member roles            | ✅     | ❌     | ❌      | ❌    |
+| Update tenant name             | ✅     | ❌     | ❌      | ❌    |
 
 **Usage Example:**
 ```python
